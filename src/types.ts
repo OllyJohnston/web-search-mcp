@@ -78,3 +78,19 @@ export interface SearchResultWithMetadata {
   results: SearchResult[];
   engine: string;
 }
+
+// Global server configuration derived from environment variables
+export interface ServerConfig {
+  maxContentLength: number;
+  defaultTimeout: number;
+  maxBrowsers: number;
+  browserHeadless: boolean;
+  browserTypes: string[];
+  browserFallbackThreshold: number;
+  enableRelevanceChecking: boolean;
+  relevanceThreshold: number;
+  forceMultiEngineSearch: boolean;
+  debugBrowserLifecycle: boolean;
+  debugBingSearch: boolean;
+  playwrightNoSandbox: boolean;
+}

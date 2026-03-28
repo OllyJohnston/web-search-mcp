@@ -257,7 +257,7 @@ Returns formatted text content from the specified web page:
 
 2. **Search Errors**
    - Invalid search queries
-   - Rate limiting by Google
+   - Rate limiting by Search Engines
    - CAPTCHA challenges
 
 3. **Content Extraction Errors**
@@ -278,11 +278,11 @@ Returns formatted text content from the specified web page:
 
 ## Rate Limiting
 
-The server implements rate limiting to respect Google's terms of service:
+The server implements a **Sliding Window Rate Limiter** to ensure reliable operation:
 
-- Maximum 10 requests per minute
+- **10 requests per minute** (sliding window)
 - Maximum 5 concurrent content extractions
-- Automatic retry with exponential backoff
+- Automatic retry with exponential backoff for browser failures
 
 ## Performance Considerations
 
@@ -306,7 +306,7 @@ The server implements rate limiting to respect Google's terms of service:
       "command": "web-search-mcp",
       "args": [],
       "env": {
-        "GOOGLE_SEARCH_TIMEOUT": "15000",
+        "DEFAULT_TIMEOUT": "15000",
         "MAX_CONTENT_LENGTH": "75000"
       }
     }

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { Page } from 'playwright';
-import { ContentExtractionOptions, SearchResult } from './types.js';
+import { ContentExtractionOptions, SearchResult, ServerConfig } from './types.js';
 import { cleanText, getWordCount, getContentPreview, generateTimestamp, isPdfUrl } from './utils.js';
 import { BrowserPool } from './browser-pool.js';
 
@@ -10,45 +10,37 @@ export class EnhancedContentExtractor {
   private readonly maxContentLength: number;
   private browserPool: BrowserPool;
   private fallbackThreshold: number;
+  private config: ServerConfig;
 
-  constructor() {
-    this.defaultTimeout = parseInt(process.env.DEFAULT_TIMEOUT || '6000', 10);
+  constructor(config: ServerConfig, browserPool: BrowserPool) {
+    this.config = config;
+    this.defaultTimeout = config.defaultTimeout;
+    this.maxContentLength = config.maxContentLength;
+    this.browserPool = browserPool;
+    this.fallbackThreshold = config.browserFallbackThreshold;
     
-    // Read MAX_CONTENT_LENGTH from environment variable, fallback to 500KB
-    const envMaxLength = process.env.MAX_CONTENT_LENGTH;
-    this.maxContentLength = envMaxLength ? parseInt(envMaxLength, 10) : 500000;
-    
-    // Validate the parsed value
-    if (isNaN(this.maxContentLength) || this.maxContentLength < 0) {
-      console.warn(`[EnhancedContentExtractor] Invalid MAX_CONTENT_LENGTH value: ${envMaxLength}, using default 500000`);
-      this.maxContentLength = 500000;
-    }
-    
-    this.browserPool = new BrowserPool();
-    this.fallbackThreshold = parseInt(process.env.BROWSER_FALLBACK_THRESHOLD || '3', 10);
-    
-    console.log(`[EnhancedContentExtractor] Configuration: timeout=${this.defaultTimeout}, maxContentLength=${this.maxContentLength}, fallbackThreshold=${this.fallbackThreshold}`);
+    console.error(`[EnhancedContentExtractor] Configuration: timeout=${this.defaultTimeout}, maxContentLength=${this.maxContentLength}, fallbackThreshold=${this.fallbackThreshold}`);
   }
 
   async extractContent(options: ContentExtractionOptions): Promise<string> {
     const { url } = options;
     
-    console.log(`[EnhancedContentExtractor] Starting extraction for: ${url}`);
+    console.error(`[EnhancedContentExtractor] Starting extraction for: ${url}`);
     
     // First, try with regular HTTP client (faster)
     try {
       const content = await this.extractWithAxios(options);
-      console.log(`[EnhancedContentExtractor] Successfully extracted with axios: ${content.length} chars`);
+      console.error(`[EnhancedContentExtractor] Successfully extracted with axios: ${content.length} chars`);
       return content;
     } catch (error) {
-      console.log(`[EnhancedContentExtractor] Axios failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[EnhancedContentExtractor] Axios failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       
       // Check if this looks like a case where browser would help
       if (this.shouldUseBrowser(error, url)) {
-        console.log(`[EnhancedContentExtractor] Falling back to headless browser for: ${url}`);
+        console.error(`[EnhancedContentExtractor] Falling back to headless browser for: ${url}`);
         try {
           const content = await this.extractWithBrowser(options);
-          console.log(`[EnhancedContentExtractor] Successfully extracted with browser: ${content.length} chars`);
+          console.error(`[EnhancedContentExtractor] Successfully extracted with browser: ${content.length} chars`);
           return content;
         } catch (browserError) {
           console.error(`[EnhancedContentExtractor] Browser extraction also failed:`, browserError);
@@ -74,7 +66,7 @@ export class EnhancedContentExtractor {
     
     // Truncate content if it exceeds the limit (instead of axios throwing an error)
     if (maxContentLength && content.length > maxContentLength) {
-      console.log(`[EnhancedContentExtractor] Content truncated from ${content.length} to ${maxContentLength} characters for ${url}`);
+      console.error(`[EnhancedContentExtractor] Content truncated from ${content.length} to ${maxContentLength} characters for ${url}`);
       content = content.substring(0, maxContentLength);
     }
     
@@ -164,7 +156,7 @@ export class EnhancedContentExtractor {
       });
 
       // Navigate with realistic options and better error handling
-      console.log(`[BrowserExtractor] Navigating to ${url}`);
+      console.error(`[BrowserExtractor] Navigating to ${url}`);
       
       try {
         await page.goto(url, { 
@@ -176,7 +168,7 @@ export class EnhancedContentExtractor {
         const errorMessage = gotoError instanceof Error ? gotoError.message : String(gotoError);
         
         if (errorMessage.includes('ERR_HTTP2_PROTOCOL_ERROR') || errorMessage.includes('HTTP2')) {
-          console.log(`[BrowserExtractor] HTTP/2 error detected, trying with HTTP/1.1`);
+          console.error(`[BrowserExtractor] HTTP/2 error detected, trying with HTTP/1.1`);
           
           // Create a new context with HTTP/1.1 preference
           await context.close();
@@ -226,17 +218,97 @@ export class EnhancedContentExtractor {
 
       // Quick check for main content without long wait
       try {
-        await page.waitForSelector('article, main, .content, .post-content, .entry-content', {
-          timeout: 2000
-        });
+        // Reddit and other dynamic sites often use these selectors
+        const selectors = [
+          'shreddit-post', 
+          'div[id^="post-content"]', 
+          'article', 
+          'main', 
+          '.content', 
+          '.post-content', 
+          '.entry-content',
+          '#main-content',
+          '[role="main"]'
+        ];
+        
+        await Promise.race([
+          page.waitForSelector(selectors.join(', '), { timeout: 4000 }),
+          page.waitForLoadState('networkidle', { timeout: 4000 })
+        ]);
+        
+        // If it's Reddit, try to click "See more" or similar if present
+        if (url.includes('reddit.com')) {
+          const seeMoreSelectors = ['#shreddit-button-see-more', 'button:has-text("See more")'];
+          for (const s of seeMoreSelectors) {
+            const btn = await page.$(s);
+            if (btn && await btn.isVisible()) {
+              await btn.click().catch(() => {});
+              await page.waitForTimeout(500);
+            }
+          }
+        }
       } catch {
-        console.log(`[BrowserExtractor] No main content selector found, proceeding anyway`);
+        console.error(`[BrowserExtractor] Content selection/waiting finished with some timeouts, proceeding`);
       }
 
-      // Extract content using the same logic as axios version
-      const html = await page.content();
-      const content = this.parseContent(html);
+      // Wait for substantial content or timeout
+      try {
+        await page.waitForFunction(() => {
+          const bodyText = document.body.innerText.toLowerCase();
+          const hasContent = bodyText.length > 200;
+          const isBlocked = bodyText.includes('checking your browser') || 
+                            bodyText.includes('please enable javascript') ||
+                            bodyText.includes('verify you are human');
+          return hasContent && !isBlocked;
+        }, { timeout: 5000 });
+      } catch {
+        console.error(`[BrowserExtractor] Wait for substantial content timed out, extracting current state`);
+      }
 
+      // Extract content directly from the browser to handle Shadow DOM and dynamic changes
+      const extractedData = await page.evaluate(() => {
+        // Essential cleaning in-browser
+        const selectorsToRemove = [
+          'nav', 'header', 'footer', 'script', 'style', 'noscript', 'iframe',
+          '.nav', '.header', '.footer', '.sidebar', '.menu', '.ad', '.ads',
+          '.cookie-notice', '.privacy-notice', '.login-form', '.signup-form'
+        ];
+        
+        selectorsToRemove.forEach(selector => {
+          document.querySelectorAll(selector).forEach(el => el.remove());
+        });
+        
+        // Try to find the best content container
+        const contentSelectors = [
+          'shreddit-post', 
+          'div[id^="post-content"]',
+          'article', 
+          'main', 
+          '[role="main"]',
+          '.content', 
+          '.post-content',
+          '#main-content'
+        ];
+        
+        for (const selector of contentSelectors) {
+          const element = document.querySelector(selector);
+          if (element && element.textContent && element.textContent.trim().length > 200) {
+            return {
+              text: (element as HTMLElement).innerText,
+              selectorUsed: selector
+            };
+          }
+        }
+        
+        return {
+          text: document.body.innerText,
+          selectorUsed: 'body'
+        };
+      });
+
+      console.error(`[BrowserExtractor] Successfully extracted ${extractedData.text.length} chars using selector: ${extractedData.selectorUsed}`);
+      
+      const content = this.cleanTextContent(extractedData.text);
       await context.close();
       return content;
 
@@ -271,7 +343,7 @@ export class EnhancedContentExtractor {
       }
     } catch {
       // Ignore simulation errors
-      console.log(`[BrowserExtractor] Behavior simulation failed, continuing`);
+      console.error(`[BrowserExtractor] Behavior simulation failed, continuing`);
     }
   }
 
@@ -398,13 +470,13 @@ export class EnhancedContentExtractor {
   }
 
   async extractContentForResults(results: SearchResult[], targetCount: number = results.length): Promise<SearchResult[]> {
-    console.log(`[EnhancedContentExtractor] Processing up to ${results.length} results to get ${targetCount} non-PDF results`);
+    console.error(`[EnhancedContentExtractor] Processing up to ${results.length} results to get ${targetCount} non-PDF results`);
     
     // Filter out PDF files first
     const nonPdfResults = results.filter(result => !isPdfUrl(result.url));
     const resultsToProcess = nonPdfResults.slice(0, Math.min(targetCount * 2, 10)); // Process extra to account for failures
     
-    console.log(`[EnhancedContentExtractor] Processing ${resultsToProcess.length} non-PDF results concurrently`);
+    console.error(`[EnhancedContentExtractor] Processing ${resultsToProcess.length} non-PDF results concurrently`);
     
     // Process results concurrently with timeout
     const extractionPromises = resultsToProcess.map(async (result): Promise<SearchResult> => {
@@ -422,7 +494,7 @@ export class EnhancedContentExtractor {
         const content = await Promise.race([extractionPromise, timeoutPromise]);
         const cleanedContent = cleanText(content, this.maxContentLength);
         
-        console.log(`[EnhancedContentExtractor] Successfully extracted: ${result.url}`);
+        console.error(`[EnhancedContentExtractor] Successfully extracted: ${result.url}`);
         return {
           ...result,
           fullContent: cleanedContent,
@@ -432,7 +504,7 @@ export class EnhancedContentExtractor {
           fetchStatus: 'success' as const,
         };
       } catch (error) {
-        console.log(`[EnhancedContentExtractor] Failed to extract: ${result.url} - ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error(`[EnhancedContentExtractor] Failed to extract: ${result.url} - ${error instanceof Error ? error.message : 'Unknown error'}`);
         return {
           ...result,
           fullContent: '',
@@ -458,7 +530,7 @@ export class EnhancedContentExtractor {
       ...failedResults.slice(0, Math.max(0, targetCount - successfulResults.length))
     ].slice(0, targetCount);
     
-    console.log(`[EnhancedContentExtractor] Completed processing ${resultsToProcess.length} results, extracted ${successfulResults.length} successful/${failedResults.length} failed`);
+    console.error(`[EnhancedContentExtractor] Completed processing ${resultsToProcess.length} results, extracted ${successfulResults.length} successful/${failedResults.length} failed`);
     return enhancedResults;
   }
 
@@ -495,6 +567,8 @@ export class EnhancedContentExtractor {
     
     // Priority selectors for main content
     const contentSelectors = [
+      'shreddit-post',
+      'div[id^="post-content"]',
       'article',
       'main',
       '[role="main"]',
@@ -518,7 +592,7 @@ export class EnhancedContentExtractor {
       if ($content.length > 0) {
         mainContent = $content.text().trim();
         if (mainContent.length > 100) { // Ensure we have substantial content
-          console.log(`[EnhancedContentExtractor] Found content with selector: ${selector} (${mainContent.length} chars)`);
+          console.error(`[EnhancedContentExtractor] Found content with selector: ${selector} (${mainContent.length} chars)`);
           break;
         }
       }
@@ -526,7 +600,7 @@ export class EnhancedContentExtractor {
     
     // If no main content found, try body content
     if (!mainContent || mainContent.length < 100) {
-      console.log(`[EnhancedContentExtractor] No main content found, using body content`);
+      console.error(`[EnhancedContentExtractor] No main content found, using body content`);
       mainContent = $('body').text().trim();
     }
     
@@ -582,9 +656,5 @@ export class EnhancedContentExtractor {
     }
     
     return error instanceof Error ? error.message : 'Unknown error';
-  }
-
-  async closeAll(): Promise<void> {
-    await this.browserPool.closeAll();
   }
 }

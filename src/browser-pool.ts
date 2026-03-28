@@ -1,4 +1,5 @@
 import { chromium, firefox, webkit, Browser } from 'playwright';
+import { ServerConfig } from './types.js';
 
 export class BrowserPool {
   private browsers: Map<string, Browser> = new Map();
@@ -7,17 +8,15 @@ export class BrowserPool {
   private currentBrowserIndex = 0;
   private headless: boolean;
   private lastUsedBrowserType: string = '';
+  private config: ServerConfig;
 
-  constructor() {
-    // Read configuration from environment variables
-    this.maxBrowsers = parseInt(process.env.MAX_BROWSERS || '3', 10);
-    this.headless = process.env.BROWSER_HEADLESS !== 'false'; // Default to true
+  constructor(config: ServerConfig) {
+    this.config = config;
+    this.maxBrowsers = config.maxBrowsers;
+    this.headless = config.browserHeadless;
+    this.browserTypes = config.browserTypes;
     
-    // Configure browser types based on environment
-    const browserTypesEnv = process.env.BROWSER_TYPES || 'chromium,firefox';
-    this.browserTypes = browserTypesEnv.split(',').map(type => type.trim());
-    
-    console.log(`[BrowserPool] Configuration: maxBrowsers=${this.maxBrowsers}, headless=${this.headless}, types=${this.browserTypes.join(',')}`);
+    console.error(`[BrowserPool] Configuration: maxBrowsers=${this.maxBrowsers}, headless=${this.headless}, types=${this.browserTypes.join(',')}, noSandbox=${this.config.playwrightNoSandbox}`);
   }
 
   async getBrowser(): Promise<Browser> {
@@ -41,24 +40,24 @@ export class BrowserPool {
           return browser;
         }
       } catch (error) {
-        console.log(`[BrowserPool] Browser ${browserType} health check failed:`, error);
+        console.error(`[BrowserPool] Browser ${browserType} health check failed:`, error);
         // Browser is unhealthy, remove it and close if possible
         this.browsers.delete(browserType);
         try {
           await browser.close();
         } catch (closeError) {
-          console.log(`[BrowserPool] Error closing unhealthy browser:`, closeError);
+          console.error(`[BrowserPool] Error closing unhealthy browser:`, closeError);
         }
       }
     }
 
     // Launch new browser
-    console.log(`[BrowserPool] Launching new ${browserType} browser`);
+    console.error(`[BrowserPool] Launching new ${browserType} browser`);
     
     const launchOptions = {
       headless: this.headless,
       args: [
-        '--no-sandbox',
+        ...(this.config.playwrightNoSandbox ? ['--no-sandbox'] : []),
         '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
         '--disable-gpu',
@@ -113,7 +112,7 @@ export class BrowserPool {
   }
 
   async closeAll(): Promise<void> {
-    console.log(`[BrowserPool] Closing ${this.browsers.size} browsers`);
+    console.error(`[BrowserPool] Closing ${this.browsers.size} browsers`);
     
     const closePromises = Array.from(this.browsers.values()).map(browser => 
       browser.close().catch(error => 

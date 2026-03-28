@@ -2,10 +2,9 @@ import pLimit from 'p-limit';
 
 export class RateLimiter {
   private limit: ReturnType<typeof pLimit>;
-  private requestCount: number = 0;
-  private lastResetTime: number = Date.now();
+  private requestTimestamps: number[] = [];
   private readonly maxRequestsPerMinute: number;
-  private readonly resetIntervalMs: number = 60000; // 1 minute
+  private readonly windowIntervalMs: number = 60000; // 1 minute
 
   constructor(maxRequestsPerMinute: number = 10) {
     this.maxRequestsPerMinute = maxRequestsPerMinute;
@@ -13,33 +12,42 @@ export class RateLimiter {
   }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
-    // Check if we need to reset the counter
     const now = Date.now();
-    if (now - this.lastResetTime >= this.resetIntervalMs) {
-      this.requestCount = 0;
-      this.lastResetTime = now;
-    }
-
+    
+    // Clean up older timestamps outside the rolling window
+    this.requestTimestamps = this.requestTimestamps.filter(t => now - t < this.windowIntervalMs);
+    
     // Check rate limit
-    if (this.requestCount >= this.maxRequestsPerMinute) {
-      const waitTime = this.resetIntervalMs - (now - this.lastResetTime);
+    if (this.requestTimestamps.length >= this.maxRequestsPerMinute) {
+      const oldestTimestamp = this.requestTimestamps[0];
+      const waitTime = this.windowIntervalMs - (now - oldestTimestamp);
       throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(waitTime / 1000)} seconds.`);
     }
 
     // Execute with concurrency limit
     const result = await this.limit(async () => {
-      this.requestCount++;
+      // Record timestamp right before execution within concurrency tracking
+      this.requestTimestamps.push(Date.now());
       return await fn();
     });
 
     return result;
   }
 
-  getStatus(): { requestCount: number; maxRequests: number; resetTime: number } {
+  getStatus(): { requestCount: number; maxRequests: number; waitTimeMs: number } {
+    const now = Date.now();
+    this.requestTimestamps = this.requestTimestamps.filter(t => now - t < this.windowIntervalMs);
+    
+    let waitTimeMs = 0;
+    if (this.requestTimestamps.length >= this.maxRequestsPerMinute) {
+      const oldestTimestamp = this.requestTimestamps[0];
+      waitTimeMs = this.windowIntervalMs - (now - oldestTimestamp);
+    }
+
     return {
-      requestCount: this.requestCount,
+      requestCount: this.requestTimestamps.length,
       maxRequests: this.maxRequestsPerMinute,
-      resetTime: this.lastResetTime + this.resetIntervalMs,
+      waitTimeMs: Math.max(0, waitTimeMs),
     };
   }
 } 
