@@ -228,7 +228,7 @@ export class EnhancedContentExtractor {
   private parseContent(html: string): string {
     const $ = cheerio.load(html);
     $('script, style, nav, header, footer').remove();
-    let mainContent = $('article, main, .content, .post-content, body').first().text().trim();
+    const mainContent = $('article, main, .content, .post-content, body').first().text().trim();
     return this.cleanTextContent(mainContent);
   }
 

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SearchOptions, SearchResult, SearchResultWithMetadata, ServerConfig } from './types.js';
-import { generateTimestamp, sanitizeQuery, getRandomUserAgent, isPdfUrl, Logger } from './utils.js';
+import { SearchOptions, SearchResult, SearchResultWithMetadata, ServerConfig, SEARCH_CONFIG } from './types.js';
+import { generateTimestamp, sanitizeQuery, getRandomUserAgent, Logger } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
 import { BrowserPool } from './browser-pool.js';
 
@@ -17,7 +17,7 @@ export class SearchEngine {
 
   constructor(config: ServerConfig, browserPool: BrowserPool, logger: Logger) {
     this.config = config;
-    this.rateLimiter = new RateLimiter(10); // 10 requests per minute
+    this.rateLimiter = new RateLimiter(this.config.rateLimitPerMinute); 
     this.browserPool = browserPool;
     this.logger = logger;
   }
@@ -77,8 +77,8 @@ export class SearchEngine {
           
           const sharedStatus: ParallelStatus = { resultsFound: false };
           const parallelResults = await Promise.allSettled([
-            approaches[0].method(sanitizedQuery, numResults, Math.min(timeout / 2, 10000), sharedStatus),
-            approaches[1].method(sanitizedQuery, numResults, Math.min(timeout / 2, 8000), sharedStatus)
+            approaches[0].method(sanitizedQuery, numResults, Math.min(timeout * SEARCH_CONFIG.PARALLEL_SEARCH_TIMEOUT_FRACTION, 10000), sharedStatus),
+            approaches[1].method(sanitizedQuery, numResults, Math.min(timeout * SEARCH_CONFIG.PARALLEL_SEARCH_TIMEOUT_FRACTION, 8000), sharedStatus)
           ]);
 
           parallelResults.forEach((result, idx) => {
@@ -125,7 +125,7 @@ export class SearchEngine {
           try {
             this.logger.info(`[SearchEngine] [${i + 1}/${approaches.length}] Attempting ${approach.name}...`);
 
-            const approachTimeout = Math.min(timeout / 3, 10000); 
+            const approachTimeout = Math.min(timeout * SEARCH_CONFIG.SEQUENTIAL_SEARCH_TIMEOUT_FRACTION, 10000); 
             const results = await approach.method(sanitizedQuery, numResults, approachTimeout);
             
             if (results && results.length > 0) {
@@ -583,7 +583,9 @@ export class SearchEngine {
         const urlParams = new URLSearchParams(url.substring(url.indexOf('?') + 1));
         const actualUrl = urlParams.get('uddg');
         if (actualUrl) return decodeURIComponent(actualUrl);
-      } catch (e) {}
+      } catch (e) {
+        // Silently ignore URL parsing errors for DuckDuckGo redirects
+      }
     }
     return this.cleanUrl(url);
   }
@@ -703,7 +705,9 @@ export class SearchEngine {
           await page.waitForTimeout(500);
         }
       }
-    } catch (e) { }
+    } catch (e) {
+      // Ignore consent dismissal errors
+    }
   }
 
   private getRandomViewportAndDevice(): { viewport: { width: number; height: number }; hasTouch: boolean; isMobile: boolean } {

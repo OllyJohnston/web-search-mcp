@@ -77,7 +77,7 @@ export class BrowserPool {
     // Launch new browser and register the promise to prevent concurrent duplicates
     this.logger.info(`[BrowserPool] Launching new ${browserType} browser`);
     
-    const launchPromise = this.launchBrowser(browserType);
+    const launchPromise = this.launchBrowserWithRetry(browserType);
     this.launchPromises.set(browserType, launchPromise);
 
     try {
@@ -89,7 +89,31 @@ export class BrowserPool {
     }
   }
 
-  private async launchBrowser(browserType: string): Promise<Browser> {
+  private async launchBrowserWithRetry(
+    browserType: string,
+    maxRetries: number = 3,
+    baseDelayMs: number = 1000
+  ): Promise<Browser> {
+    const exponentialBackoff = (attempt: number) =>
+      Math.min(baseDelayMs * Math.pow(2, attempt - 1), 30000);
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.launchBrowserInternal(browserType);
+      } catch (error) {
+        if (attempt === maxRetries) {
+          this.logger.error(`[BrowserPool] All retries exhausted for ${browserType}:`, error);
+          throw error;
+        }
+        const delayMs = exponentialBackoff(attempt);
+        this.logger.warn(`[BrowserPool] Failed to launch ${browserType} browser (attempt ${attempt}/${maxRetries}). Retrying in ${delayMs}ms...`, error);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+    throw new Error(`Failed to launch ${browserType} browser after ${maxRetries} attempts`);
+  }
+
+  private async launchBrowserInternal(browserType: string): Promise<Browser> {
     const launchOptions = {
       headless: this.headless,
       args: [

@@ -7,9 +7,9 @@ import express from 'express';
 import { Command } from 'commander';
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
-import { WebSearchToolInput, WebSearchToolOutput, SearchResult, ServerConfig } from './types.js';
+import { WebSearchToolInput, WebSearchToolOutput, ServerConfig } from './types.js';
 import { BrowserPool } from './browser-pool.js';
-import { isPdfUrl, Logger } from './utils.js';
+import { Logger } from './utils.js';
 import crypto from 'node:crypto';
 
 class WebSearchMCPServer {
@@ -38,7 +38,6 @@ class WebSearchMCPServer {
       // 1. Try MCP Protocol Notification (standard way)
       try {
         if (this.isConnected) {
-          // @ts-ignore - access to internal server for notification
           const baseServer = this.server.server;
           if (baseServer) {
             baseServer.notification({
@@ -51,7 +50,11 @@ class WebSearchMCPServer {
             });
           }
         }
-      } catch (err) { }
+      } catch (err) {
+        // Fallback if protocol notification fails
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[INTERNAL ERROR] Failed to send MCP notification: ${errorMsg}`);
+      }
       
       // 2. Fallback or Force to StdErr (for LM Studio visibility)
       // We only fallback to stderr IF not connected, OR if ALWAYS_LOG_TO_STDERR is set
@@ -95,7 +98,8 @@ class WebSearchMCPServer {
       debugBingSearch: process.env.DEBUG_BING_SEARCH === 'true',
       playwrightNoSandbox,
       verboseLogging: process.env.VERBOSE_LOGGING !== 'false',
-      alwaysLogToStdErr: process.env.ALWAYS_LOG_TO_STDERR === 'true'
+      alwaysLogToStdErr: process.env.ALWAYS_LOG_TO_STDERR === 'true',
+      rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE || '10', 10)
     };
   }
 

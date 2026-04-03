@@ -97,4 +97,10 @@ export interface ServerConfig {
   playwrightNoSandbox: boolean;
   verboseLogging?: boolean;
   alwaysLogToStdErr?: boolean;
+  rateLimitPerMinute: number;
 }
+
+export const SEARCH_CONFIG = {
+  PARALLEL_SEARCH_TIMEOUT_FRACTION: 0.5,      // Half for parallel safety margin
+  SEQUENTIAL_SEARCH_TIMEOUT_FRACTION: 0.33,   // Third for sequential budgeting
+};
