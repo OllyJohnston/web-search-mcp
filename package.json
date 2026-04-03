@@ -1,6 +1,6 @@
 {
   "name": "web-search-mcp-server",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "description": "A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactored and Enhanced)",
   "license": "MIT",
   "type": "module",

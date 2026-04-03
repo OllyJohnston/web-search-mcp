@@ -23,6 +23,8 @@ export interface SearchOptions {
   query: string;
   numResults?: number;
   timeout?: number;
+  preferredEngine?: string;
+  forceMultiEngine?: boolean;
 }
 
 export interface ContentExtractionOptions {
@@ -93,4 +95,6 @@ export interface ServerConfig {
   debugBrowserLifecycle: boolean;
   debugBingSearch: boolean;
   playwrightNoSandbox: boolean;
+  verboseLogging?: boolean;
+  alwaysLogToStdErr?: boolean;
 }

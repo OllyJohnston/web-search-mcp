@@ -4,34 +4,35 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 
 ## Recent Improvements
 
-- **Protocol Compliance**: All internal logging migrated from `stdout` to `stderr` to ensure the MCP protocol stream remains clean and connections stay stable.
-- **Improved LLM Compatibility**: Simplified Zod schemas and enhanced parameter handling for better compatibility with Gemini 3.5, Claude 4.6, and other strict JSON schema validators.
-- **Streamable HTTP Support**: Added support for network-accessible operation using the MCP Streamable HTTP (SSE) standard.
-- **Shared Browser Pool**: Efficiently manages Playwright instances across all search engines and extractors, reducing memory overhead and improving performance.
-- **Centralized Configuration**: All environment variables are parsed once at startup into a strict `ServerConfig` object.
-- **Playwright Sandbox Control**: Added `--no-sandbox` CLI flag and `PLAYWRIGHT_NO_SANDBOX` environment variable to support containerized/Docker environments.
-- **Sliding Window Rate Limiter**: Implemented a mathematically accurate rolling window for API/search rate limiting.
-- **Enhanced Extraction Reliability**: Significant improvements to content extraction for dynamic sites like Reddit, including shadow DOM support and interaction handling.
+- **SillyTavern Quality Parity**: Reached full logic parity with the original SillyTavern search component, including advanced hardware fingerprinting and human-mimicry interaction logic.
+- **Enhanced Bot-Evasion**: Implemented `deviceScaleFactor` randomization and `hasTouch: false` viewport enforcement to bypass advanced anti-bot measures.
+- **Robust Challenge Handling**: Added non-linear mouse jitter and improved frame-polling for anti-bot challenges.
+- **Protocol Compliance**: All internal logging migrated from `stdout` to `stderr` to ensure the MCP protocol stream remains clean.
 
 ## Changelog
 
-### [0.4.0] - 2026-03-28 (Major Refactor)
-- **Centralized Configuration**: Moved all environment variable parsing to a dedicated `ServerConfig` object initialized at startup.
-- **Shared Browser Pool**: Replaced per-request browser launches with a managed pool. `SearchEngine` and `ContentExtractor` now share the same browser instances, significantly reducing memory and CPU spikes.
-- **Sliding Window Rate Limiting**: Migrated to a mathematically precise rolling window for API rate limiting (10 requests/minute).
-- **HTTP/SSE Transport**: Full support for network-accessible MCP clients via `--http`.
-- **Enhanced Reddit Extraction**: Added shadow DOM selectors and "See more" click handling for dynamic Reddit threads.
-- **Improved DuckDuckGo Reliability**: Added explicit status code logging for Axios-based search failures.
-- **Playwright Sandbox Control**: Added `--no-sandbox` CLI flag and `PLAYWRIGHT_NO_SANDBOX` env var for containerized environments.
-- **Premium Documentation**: Completely overhauled Troubleshooting and Installation guides.
+### [0.7.0] - 2026-04-03 (SillyTavern Quality Parity)
+- **Advanced Fingerprinting**: Added `deviceScaleFactor` randomization and enforced `hasTouch: false` to ensure desktop-class parsing.
+- **Human-Mimicry Interaction**: Added non-linear mouse movement jitter during anti-bot challenge bypass.
+- **Stable Browser Acquisition**: Refined health-checks to use `isConnected()` only, eliminating "target closed" race conditions.
+- **Async Signal Safety**: Ensured all Playwright route signals and Axios AbortControllers are properly awaited/cancelled.
+- **Expanded UA Pool**: Significantly updated the User-Agent database with modern strings for all major browsers.
+
+### [0.5.0] - 2026-04-02 (SillyTavern Search Features Integration)
+- **Parallel Search Orchestration**: Refactored the search engine to execute multiple providers concurrently. Initial results are weighted by relevance, with an "early exit" success switch to prioritize speed.
+- **New Search Engines**: Added DuckDuckGo Lite and Startpage as high-performance Axios-based fallback engines, significantly improving reliability without browser overhead.
+- **Improved Stealth & Interaction**: Implemented human-like mouse jitters, wheel scrolls, and randomized delays during content extraction to bypass bot detection on dynamic sites like Reddit and Twitter.
+- **Shared Browser Idle Timeout**: Implemented an automatic cleanup timer that closes all browser instances after 2 minutes of inactivity (configurable) to reclaim system resources.
+
+### [0.4.0] - 2026-03-28 (Major Refactor & Performance Boost)
 
 ## Features
 
-- **Multi-Engine Web Search**: Prioritises Bing > Brave > DuckDuckGo for optimal reliability and performance
-- **Full Page Content Extraction**: Fetches and extracts complete page content from search results
-- **Multiple Search Tools**: Three specialised tools for different use cases
-- **Smart Request Strategy**: Switches between playwright browesrs and fast axios requests to ensure results are returned
-- **Concurrent Processing**: Extracts content from multiple pages simultaneously
+- **Stealth Search**: Advanced bot-evasion with randomized fingerprints, human-mimicry interaction logic (non-linear mouse jitter), and rotating User-Agents.
+- **Parallel Multi-Engine Execution**: Simultaneously queries multiple search engines (Bing, Startpage, DuckDuckGo) for maximum speed and reliability.
+- **Enhanced Content Crawler**: High-performance page extraction with resource filtering (blocking images/fonts) and global deadline awareness.
+- **Shared Browser Pool**: Efficiently manages Playwright instances across all engines with automatic 2-minute inactivity cleanup.
+- **Protocol-Compliant Logging**: Detailed search progress and diagnostic info routed via standard MCP notifications or optional dual-stream stderr.
 - **Transport Flexibility**: Support for both standard `stdio` pipe and `HTTP/SSE` transport modes.
 
 ## How It Works
@@ -40,11 +41,11 @@ The server provides three specialised tools for different web search needs:
 
 ### 1. `full-web-search` (Main Tool)
 When a comprehensive search is requested, the server uses an **optimised search strategy**:
-1. **Browser-based Bing Search** - Primary method using shared Chromium instance
-2. **Browser-based Brave Search** - Secondary option using shared Firefox instance
-3. **Axios DuckDuckGo Search** - Final fallback using traditional HTTP with detailed error logging
-4. **Shared Browser Pool**: Efficiently reuses browser instances while maintaining request isolation via Playwright Contexts
-5. **Content extraction**: Tries axios first, then falls back to browser with human behavior simulation and targeted Reddit selectors
+1. **Parallel Execution Phase**: Simultaneously queries the top 2 engines (DDG Lite & Browser Bing) to minimize latency.
+2. **Success Switch Logic**: Evaluates results against a relevance threshold. If a "high quality" result is found early, it returns immediately and cancels remaining requests.
+3. **Multi-Engine Waterfall**: If parallel phase fails, it falls back to Axios Startpage and Browser Brave.
+4. **Shared Browser Pool & Idle Cleanup**: Efficiently reuses browser instances and automatically closes them after `BROWSER_IDLE_TIMEOUT` to save memory.
+5. **Stealth Content Extraction**: Tries axios first, then falls back to browser with human behavior simulation (jitter/scroll) and targeted site selectors.
 6. **Concurrent processing**: Extracts content from multiple pages simultaneously with timeout protection and a sliding window rate limiter
 7. **HTTP/2 error recovery**: Automatically falls back to HTTP/1.1 when protocol errors occur
 
@@ -78,14 +79,21 @@ This MCP server has been developed and tested with **LM Studio**, **LibreChat**,
 - Node.js 18.0.0 or higher
 - npm 8.0.0 or higher
 
-1. **Clone or Download the repo**
-2. **Open a terminal in the folder and run:**
+1. **Extract the ZIP** (if you've downloaded the release):
+   Unzip the archive into your preferred deployment folder (e.g., `E:\Utils\WebSearchMCP`).
+
+2. **Open a terminal in that folder and run:**
    ```bash
    npm install
-   npx playwright install chromium
+   npx playwright install chromium firefox
+   ```
+   **Important**: This step is required even if you have the `dist/` folder, as it installs the MCP SDK and the necessary browser binaries used for searching.
+
+3. **Verify the build**:
+   If you are a developer and want to rebuild from source:
+   ```bash
    npm run build
    ```
-   This will install all required dependencies, Playwright browsers, and build the project.
 
 ### Configuration (mcp.json)
 
@@ -158,11 +166,15 @@ By default, the server runs Playwright with `--no-sandbox` for maximum compatibi
 - **`DEFAULT_TIMEOUT`**: Default timeout for requests in milliseconds (default: 6000)
 - **`MAX_BROWSERS`**: Maximum number of browser instances in the shared pool (default: 3)
 - **`BROWSER_TYPES`**: Comma-separated list of browser types (default: 'chromium,firefox')
+- **`BROWSER_IDLE_TIMEOUT`**: Idle time (ms) before browser pool cleanup (default: 120000)
+- **`ENABLE_PARALLEL_SEARCH`**: Enable concurrent engine fetching (default: true)
 - **`BROWSER_FALLBACK_THRESHOLD`**: Number of axios failures before using browser (default: 3)
 - **`PLAYWRIGHT_NO_SANDBOX`**: Run Playwright with `--no-sandbox` (default: true)
 - **`ENABLE_RELEVANCE_CHECKING`**: Enable search result quality validation (default: true)
 - **`RELEVANCE_THRESHOLD`**: Minimum quality score, 0.0 to 1.0 (default: 0.3)
 - **`FORCE_MULTI_ENGINE_SEARCH`**: Always search multiple engines (default: false)
+- **`VERBOSE_LOGGING`**: Enable detailed search progress logs in LM Studio (default: false). If true, logs will appear as [ERROR] tags but contain useful progress info.
+- **`ALWAYS_LOG_TO_STDERR`**: Force all logs to `stderr` even if the MCP protocol is connected (default: false). Useful for debugging in environments like LM Studio that capture `stderr`.
 - **`DEBUG_BROWSER_LIFECYCLE`**: Log detailed browser open/close events (default: false)
 - **`DEBUG_BING_SEARCH`**: Log detailed Bing search parsing steps (default: false)
 

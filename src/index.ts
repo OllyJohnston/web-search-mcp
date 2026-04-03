@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-console.error('Web Search MCP Server starting...');
-
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -11,33 +9,63 @@ import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
 import { WebSearchToolInput, WebSearchToolOutput, SearchResult, ServerConfig } from './types.js';
 import { BrowserPool } from './browser-pool.js';
-import { isPdfUrl } from './utils.js';
+import { isPdfUrl, Logger } from './utils.js';
 import crypto from 'node:crypto';
-
-interface RunOptions {
-  transport: 'stdio' | 'http';
-  port?: number;
-  playwrightNoSandbox?: boolean;
-}
 
 class WebSearchMCPServer {
   private server: McpServer;
-  private searchEngine: SearchEngine;
-  private contentExtractor: EnhancedContentExtractor;
+  private searchEngine!: SearchEngine;
+  private contentExtractor!: EnhancedContentExtractor;
   private config: ServerConfig;
-  private browserPool: BrowserPool;
+  private browserPool!: BrowserPool;
+  private logger: Logger;
+  private isConnected = false;
 
   constructor(cliConfig?: { playwrightNoSandbox?: boolean }) {
     this.server = new McpServer({
-      name: 'web-search-mcp',
-      version: '0.4.0',
+      name: 'web-search-mcp-server',
+      version: '0.7.0',
     });
 
     this.config = this.parseConfig(cliConfig);
-    this.browserPool = new BrowserPool(this.config);
+    this.logger = new Logger(this.config.verboseLogging);
+    
+    // Attach MCP protocol logging with dual-stream support
+    this.logger.setNotificationCallback((level, message) => {
+      const prefix = level === 'notice' ? '' : `[${level.toUpperCase()}] `;
+      const fullMessage = `${prefix}${message}`;
 
-    this.searchEngine = new SearchEngine(this.config, this.browserPool);
-    this.contentExtractor = new EnhancedContentExtractor(this.config, this.browserPool);
+      // 1. Try MCP Protocol Notification (standard way)
+      try {
+        if (this.isConnected) {
+          // @ts-ignore - access to internal server for notification
+          const baseServer = this.server.server;
+          if (baseServer) {
+            baseServer.notification({
+              method: 'notifications/logging/message',
+              params: {
+                level: level as any,
+                data: message,
+                logger: 'web-search-mcp'
+              }
+            });
+          }
+        }
+      } catch (err) { }
+      
+      // 2. Fallback or Force to StdErr (for LM Studio visibility)
+      // We only fallback to stderr IF not connected, OR if ALWAYS_LOG_TO_STDERR is set
+      const forceStdErr = this.config.alwaysLogToStdErr || process.env.ALWAYS_LOG_TO_STDERR === 'true';
+      if (!this.isConnected || forceStdErr) {
+        // Use a standard prefix that LM Studio might not flag as a red error for non-error levels
+        if (level === 'error' || level === 'warning') {
+          console.error(fullMessage);
+        } else {
+          // Some clients treat stderr as Info if prefixed correctly, or just "uncolored"
+          console.error(`[INFO] ${message}`);
+        }
+      }
+    });
 
     this.setupTools();
     this.setupGracefulShutdown();
@@ -46,7 +74,6 @@ class WebSearchMCPServer {
   private parseConfig(cliConfig?: { playwrightNoSandbox?: boolean }): ServerConfig {
     const maxContentLengthParsed = parseInt(process.env.MAX_CONTENT_LENGTH || '500000', 10);
     
-    // Determine no-sandbox: CLI flag > Env Var > Default (true)
     let playwrightNoSandbox = true;
     if (cliConfig?.playwrightNoSandbox !== undefined) {
       playwrightNoSandbox = cliConfig.playwrightNoSandbox;
@@ -56,353 +83,204 @@ class WebSearchMCPServer {
 
     return {
       maxContentLength: isNaN(maxContentLengthParsed) || maxContentLengthParsed < 0 ? 500000 : maxContentLengthParsed,
-      defaultTimeout: parseInt(process.env.DEFAULT_TIMEOUT || '6000', 10),
+      defaultTimeout: parseInt(process.env.DEFAULT_TIMEOUT || '15000', 10),
       maxBrowsers: parseInt(process.env.MAX_BROWSERS || '3', 10),
       browserHeadless: process.env.BROWSER_HEADLESS !== 'false',
-      browserTypes: (process.env.BROWSER_TYPES || 'chromium,firefox').split(',').map(type => type.trim()),
-      browserFallbackThreshold: parseInt(process.env.BROWSER_FALLBACK_THRESHOLD || '3', 10),
+      browserTypes: (process.env.BROWSER_TYPES || 'chromium').split(',').map(type => type.trim()),
+      browserFallbackThreshold: parseFloat(process.env.BROWSER_FALLBACK_THRESHOLD || '0.5'),
       enableRelevanceChecking: process.env.ENABLE_RELEVANCE_CHECKING !== 'false',
       relevanceThreshold: parseFloat(process.env.RELEVANCE_THRESHOLD || '0.3'),
-      forceMultiEngineSearch: process.env.FORCE_MULTI_ENGINE_SEARCH === 'true',
+      forceMultiEngineSearch: process.env.FORCE_MULTI_ENGINE_SEARCH !== 'false',
       debugBrowserLifecycle: process.env.DEBUG_BROWSER_LIFECYCLE === 'true',
       debugBingSearch: process.env.DEBUG_BING_SEARCH === 'true',
-      playwrightNoSandbox
+      playwrightNoSandbox,
+      verboseLogging: process.env.VERBOSE_LOGGING !== 'false',
+      alwaysLogToStdErr: process.env.ALWAYS_LOG_TO_STDERR === 'true'
     };
   }
 
   private setupTools(): void {
-    // Register the main web search tool (primary choice for comprehensive searches)
     this.server.tool(
       'full-web-search',
-      'Search the web and fetch complete page content from top results. This is the most comprehensive web search tool. It searches the web and then follows the resulting links to extract their full page content, providing the most detailed and complete information available. Use get-web-search-summaries for a lightweight alternative.',
+      'Search the web and fetch complete page content. Features parallel execution and quality-aware fallbacks.',
       {
-        query: z.string().describe('Search query to execute (recommended for comprehensive research)'),
-        limit: z.number().int().min(1).max(10).default(5).describe('Number of results to return with full content (1-10)'),
-        includeContent: z.boolean().default(true).describe('Whether to fetch full page content (default: true)'),
-        maxContentLength: z.number().int().min(0).optional().describe('Maximum characters per result content (0 = no limit)'),
+        query: z.string().describe('Search query to execute'),
+        limit: z.number().int().min(1).max(10).default(5).describe('Number of results to return with content'),
+        includeContent: z.boolean().default(true).describe('Whether to fetch full page content'),
+        maxContentLength: z.number().int().min(0).optional().describe('Maximum characters per result content'),
       },
       async (args) => {
-        console.error(`[MCP] Tool call received: full-web-search`);
-        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        this.logger.info(`[MCP] Tool call received: full-web-search`, JSON.stringify(args));
 
         try {
-          // Arguments are already validated by Zod via McpServer.tool
           const validatedArgs = args as WebSearchToolInput;
+          const GLOBAL_TIMEOUT = 25000;
+          const toolDeadline = Date.now() + GLOBAL_TIMEOUT;
+
+          const resultPromise = this.handleWebSearch(validatedArgs, toolDeadline);
           
-          // Auto-detect model types based on parameter formats
-          // Some models might still send string-like inputs if not using strict JSON schema, 
-          // but Zod should have handled the core validation.
+          const timeoutPromise = new Promise<WebSearchToolOutput>((resolve) => {
+            setTimeout(() => {
+              this.logger.warn(`[MCP] Global tool deadline hit. Returning partial results.`);
+              resolve({
+                results: [],
+                total_results: 0,
+                search_time_ms: GLOBAL_TIMEOUT,
+                query: validatedArgs.query,
+                status: 'Global tool execution deadline reached.'
+              });
+            }, GLOBAL_TIMEOUT);
+          });
+
+          const result = await Promise.race([resultPromise, timeoutPromise]);
           
-          // Llama models often struggle with large responses
-          const isLikelyLlama = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as any).limit === 'string') ||
-            ('includeContent' in args && typeof (args as any).includeContent === 'string')
-          );
-          
-          // Detect models that handle large responses well
-          const isLikelyRobustModel = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as any).limit === 'number') &&
-            ('includeContent' in args && typeof (args as any).includeContent === 'boolean')
-          );
-          
-          // Only apply auto-limit if maxContentLength is not explicitly set (including 0)
-          const hasExplicitMaxLength = typeof args === 'object' && args !== null && 'maxContentLength' in args;
-          
-          if (!hasExplicitMaxLength && isLikelyLlama) {
-            console.error(`[MCP] Detected potential Llama model, applying content length limit`);
-            validatedArgs.maxContentLength = 2000;
-          }
-          
-          if (isLikelyRobustModel && validatedArgs.maxContentLength && validatedArgs.maxContentLength < 5000) {
-            console.error(`[MCP] Detected robust model, removing unnecessary content length limit`);
-            validatedArgs.maxContentLength = undefined;
-          }
-          
-          console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
-          console.error(`[MCP] Starting web search...`);
-          
-          const result = await this.handleWebSearch(validatedArgs);
-          console.error(`[MCP] Search completed, found ${result.results.length} results`);
-          
-          // Format the results
-          let responseText = `Search completed for "${result.query}" with ${result.total_results} results:\n\n`;
+          let responseText = `Search completed for "${result.query}" (${result.results.length} results):\n\n`;
           if (result.status) responseText += `**Status:** ${result.status}\n\n`;
           
-          const maxLength = validatedArgs.maxContentLength;
-          
+          const maxLength = validatedArgs.maxContentLength || this.config.maxContentLength;
           result.results.forEach((searchResult, idx) => {
-            responseText += `**${idx + 1}. ${searchResult.title}**\n`;
-            responseText += `URL: ${searchResult.url}\n`;
-            responseText += `Description: ${searchResult.description}\n`;
-            
-            if (searchResult.fullContent && searchResult.fullContent.trim()) {
+            responseText += `**${idx + 1}. ${searchResult.title}**\nURL: ${searchResult.url}\nDescription: ${searchResult.description}\n`;
+            if (searchResult.fullContent) {
               let content = searchResult.fullContent;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
+              if (maxLength && content.length > maxLength) {
+                content = content.substring(0, maxLength) + `... [Truncated]`;
               }
               responseText += `\n**Full Content:**\n${content}\n`;
-            } else if (searchResult.contentPreview && searchResult.contentPreview.trim()) {
-              let content = searchResult.contentPreview;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
-              }
-              responseText += `\n**Content Preview:**\n${content}\n`;
             } else if (searchResult.fetchStatus === 'error') {
               responseText += `\n**Content Extraction Failed:** ${searchResult.error}\n`;
             }
             responseText += `\n---\n\n`;
           });
           
-          return {
-            content: [{ type: 'text' as const, text: responseText }],
-          };
+          return { content: [{ type: 'text' as const, text: responseText }] };
         } catch (error) {
-          console.error(`[MCP] Error in tool handler:`, error);
+          this.logger.error(`[MCP] Error in tool handler:`, error);
           throw error;
         }
       }
     );
 
-    // Register the lightweight web search summaries tool
     this.server.tool(
       'get-web-search-summaries',
-      'Search the web and return only the search result snippets/descriptions without following links to extract full page content.',
+      'Search the web and return only snippets.',
       {
-        query: z.string().describe('Search query to execute'),
-        limit: z.number().int().min(1).max(10).default(5).describe('Number of search results to return (1-10)'),
+        query: z.string().describe('Search query'),
+        limit: z.number().int().min(1).max(10).default(5).describe('Number of results'),
       },
       async (args) => {
-        console.error(`[MCP] Tool call received: get-web-search-summaries`);
-        try {
-          const { query, limit } = args as { query: string; limit: number };
-          console.error(`[MCP] Starting web search summaries for: ${query}`);
-          
-          try {
-            const searchResponse = await this.searchEngine.search({ query, numResults: limit });
-            const summaryResults = searchResponse.results.map(item => ({
-              title: item.title,
-              url: item.url,
-              description: item.description,
-              timestamp: item.timestamp,
-            }));
-
-            console.error(`[MCP] Search summaries completed, found ${summaryResults.length} results`);
-            
-            let responseText = `Search summaries for "${query}" with ${summaryResults.length} results:\n\n`;
-            summaryResults.forEach((summary, i) => {
-              responseText += `**${i + 1}. ${summary.title}**\n`;
-              responseText += `URL: ${summary.url}\n`;
-              responseText += `Description: ${summary.description}\n`;
-              responseText += `\n---\n\n`;
-            });
-
-            return {
-              content: [{ type: 'text' as const, text: responseText }],
-            };
-          } finally {
-            try {
-              // Since BrowserPool is shared, we don't call closeAll() per-request anymore.
-              // Wait for future dedicated cleanup routine if needed, or leave active browsers in pool.
-            } catch (cleanupError) {
-              console.error(`[MCP] Error during browser cleanup:`, cleanupError);
-            }
-          }
-        } catch (error) {
-          console.error(`[MCP] Error in tool handler:`, error);
-          throw error;
-        }
+        const { query, limit } = args as { query: string; limit: number };
+        const result = await this.searchEngine.search({ query, numResults: limit });
+        let responseText = `Search summaries for "${query}":\n\n`;
+        result.results.forEach((item, i) => {
+          responseText += `**${i + 1}. ${item.title}**\nURL: ${item.url}\nDescription: ${item.description}\n---\n\n`;
+        });
+        return { content: [{ type: 'text' as const, text: responseText }] };
       }
     );
 
-    // Register the single page content extraction tool
     this.server.tool(
       'get-single-web-page-content',
-      'Extract and return the full content from a single web page URL.',
+      'Extract full content from a URL.',
       {
-        url: z.string().url().describe('The URL of the web page to extract content from'),
-        maxContentLength: z.number().int().min(0).optional().describe('Maximum characters for the extracted content (0 = no limit)'),
+        url: z.string().url().describe('The URL to extract'),
+        maxContentLength: z.number().int().min(0).optional().describe('Content limit'),
       },
       async (args) => {
-        console.error(`[MCP] Tool call received: get-single-web-page-content`);
-        try {
-          const { url, maxContentLength } = args as { url: string; maxContentLength?: number };
-          console.error(`[MCP] Starting single page content extraction for: ${url}`);
-          
-          const content = await this.contentExtractor.extractContent({
-            url,
-            maxContentLength: maxContentLength === 0 ? undefined : maxContentLength,
-          });
-
-          const urlObj = new URL(url);
-          const title = urlObj.hostname + urlObj.pathname;
-          const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
-
-          console.error(`[MCP] Single page content extraction completed, extracted ${content.length} characters`);
-
-          let responseText = `**Page Content from: ${url}**\n\n`;
-          responseText += `**Title:** ${title}\n`;
-          responseText += `**Word Count:** ${wordCount}\n`;
-          responseText += `**Content Length:** ${content.length} characters\n\n`;
-          
-          if (maxContentLength && maxContentLength > 0 && content.length > maxContentLength) {
-            responseText += `**Content (truncated at ${maxContentLength} characters):**\n${content.substring(0, maxContentLength)}\n\n[Content truncated at ${maxContentLength} characters]`;
-          } else {
-            responseText += `**Content:**\n${content}`;
-          }
-
-          return {
-            content: [{ type: 'text' as const, text: responseText }],
-          };
-        } catch (error) {
-          console.error(`[MCP] Error in tool handler:`, error);
-          throw error;
-        }
+        const { url, maxContentLength } = args as { url: string; maxContentLength?: number };
+        const content = await this.contentExtractor.extractContent({ 
+          url, 
+          maxContentLength: maxContentLength || this.config.maxContentLength 
+        });
+        return { content: [{ type: 'text' as const, text: content }] };
       }
     );
   }
 
-  private async handleWebSearch(input: WebSearchToolInput): Promise<WebSearchToolOutput> {
+  private async handleWebSearch(input: WebSearchToolInput, deadline?: number): Promise<WebSearchToolOutput> {
     const startTime = Date.now();
     const { query, limit = 5, includeContent = true } = input;
     
-    console.error(`[web-search-mcp] DEBUG: handleWebSearch called with limit=${limit}, includeContent=${includeContent}`);
-
-    try {
-      const searchLimit = includeContent ? Math.min(limit * 2 + 2, 10) : limit;
-      console.error(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
-      
-      const searchResponse = await this.searchEngine.search({
-        query,
-        numResults: searchLimit,
-      });
-      const searchResults = searchResponse.results;
-      
-      const pdfCount = searchResults.filter(result => isPdfUrl(result.url)).length;
-      const followedCount = searchResults.length - pdfCount;
-      console.error(`[web-search-mcp] DEBUG: Search engine: ${searchResponse.engine}; ${limit} requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed.`);
-
-      const enhancedResults = includeContent 
-        ? await this.contentExtractor.extractContentForResults(searchResults, limit)
-        : searchResults.slice(0, limit);
-      
-      let combinedStatus = `Search engine: ${searchResponse.engine}; ${limit} result requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed`;
-      
-      if (includeContent) {
-        const successCount = enhancedResults.filter(r => r.fetchStatus === 'success').length;
-        const failedResults = enhancedResults.filter(r => r.fetchStatus === 'error');
-        const failedCount = failedResults.length;
-        
-        const failureReasons = this.categorizeFailureReasons(failedResults);
-        const failureReasonText = failureReasons.length > 0 ? ` (${failureReasons.join(', ')})` : '';
-        
-        console.error(`[web-search-mcp] DEBUG: Links requested: ${limit}; Successfully extracted: ${successCount}; Failed: ${failedCount}${failureReasonText}; Results: ${enhancedResults.length}.`);
-        combinedStatus += `; Successfully extracted: ${successCount}; Failed: ${failedCount}; Results: ${enhancedResults.length}`;
-      }
-
-      const searchTime = Date.now() - startTime;
-
-      return {
-        results: enhancedResults,
-        total_results: enhancedResults.length,
-        search_time_ms: searchTime,
-        query,
-        status: combinedStatus,
-      };
-    } catch (error) {
-      console.error('Web search error:', error);
-      throw new Error(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  private categorizeFailureReasons(failedResults: SearchResult[]): string[] {
-    const reasonCounts = new Map<string, number>();
-    failedResults.forEach(result => {
-      if (result.error) {
-        const category = this.categorizeError(result.error);
-        reasonCounts.set(category, (reasonCounts.get(category) || 0) + 1);
-      }
+    const searchResponse = await this.searchEngine.search({
+      query,
+      numResults: limit,
+      forceMultiEngine: this.config.forceMultiEngineSearch
     });
-    return Array.from(reasonCounts.entries()).map(([reason, count]) => 
-      count > 1 ? `${reason} (${count})` : reason
-    );
-  }
 
-  private categorizeError(errorMessage: string): string {
-    const lowerError = errorMessage.toLowerCase();
-    if (lowerError.includes('timeout')) return 'Timeout';
-    if (lowerError.includes('403')) return 'Access denied';
-    if (lowerError.includes('404')) return 'Not found';
-    if (lowerError.includes('bot') || lowerError.includes('captcha')) return 'Bot detection';
-    if (lowerError.includes('too large')) return 'Content too long';
-    if (lowerError.includes('ssl') || lowerError.includes('certificate')) return 'SSL error';
-    if (lowerError.includes('network') || lowerError.includes('connection')) return 'Network error';
-    return 'Other error';
+    let results = searchResponse.results;
+    if (includeContent) {
+      results = await this.contentExtractor.extractContentForResults(results, limit, deadline);
+    }
+
+    const successCount = results.filter(r => r.fetchStatus === 'success').length;
+    return {
+      results,
+      total_results: results.length,
+      search_time_ms: Date.now() - startTime,
+      query,
+      status: `Engine: ${searchResponse.engine}; Success: ${successCount}/${results.length}`
+    };
   }
 
   private setupGracefulShutdown(): void {
     const shutdown = async () => {
-      console.error('Shutting down gracefully...');
-      try {
-        await Promise.all([
-          this.browserPool.closeAll()
-        ]);
-      } catch (error) {
-        console.error('Error during graceful shutdown:', error);
-      }
+      this.logger.force('Shutting down gracefully...');
+      if (this.browserPool) await this.browserPool.closeAll();
       process.exit(0);
     };
-
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
   }
 
   async run(options: { transport: 'stdio' | 'http'; port?: number }): Promise<void> {
+    const startInitialization = async () => {
+      // 1. Mark as connected so the logger can use the protocol
+      this.isConnected = true; 
+      
+      this.logger.force(`Web Search MCP Server (v0.7.0) initialization starting...`);
+
+      // 2. Initialize core components AFTER protocol is up
+      // This ensures initialization info logs are sent via protocol notifications
+      this.browserPool = new BrowserPool(this.config, this.logger);
+      this.searchEngine = new SearchEngine(this.config, this.browserPool, this.logger);
+      this.contentExtractor = new EnhancedContentExtractor(this.config, this.browserPool, this.logger);
+
+      this.logger.info('Core components successfully initialized.');
+    };
+
     if (options.transport === 'http') {
       const app = express();
       const port = options.port || 8000;
-      
-      // Use JSON middleware for POST requests
       app.use(express.json());
-      
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
       });
-      
       await this.server.connect(transport);
-      
-      // Modern Streamable HTTP uses a single endpoint for both SSE (GET) and Messages (POST)
-      app.all('/mcp', (req, res) => {
-        transport.handleRequest(req, res, req.body);
-      });
-      
+      await startInitialization();
+      app.all('/mcp', (req, res) => transport.handleRequest(req, res, req.body));
       app.listen(port, () => {
-        console.error(`Web Search MCP Server (HTTP) started on port ${port}`);
-        console.error(`MCP endpoint: http://localhost:${port}/mcp`);
+        this.logger.force(`Web Search MCP Server (HTTP) started on port ${port}`);
       });
     } else {
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      console.error('Web Search MCP Server (stdio) started');
+      await startInitialization();
+      this.logger.force('Web Search MCP Server (stdio) started');
     }
   }
 }
 
-// CLI Setup
 const program = new Command();
 program
   .name('web-search-mcp')
   .description('Web Search MCP server for local LLMs')
-  .version('0.4.0')
+  .version('0.6.1')
   .option('--http', 'Run in HTTP/SSE mode')
   .option('--port <number>', 'Port for HTTP mode', '8000')
-  .option('--no-sandbox', 'Disable Playwright sandbox (useful for Docker)', true)
+  .option('--no-sandbox', 'Disable Playwright sandbox', true)
   .action(async (options) => {
     const server = new WebSearchMCPServer({ playwrightNoSandbox: options.sandbox });
-    const mode = options.http ? 'http' : 'stdio';
-    const port = parseInt(options.port, 10);
-    
-    server.run({ transport: mode, port }).catch((error) => {
-      console.error('Fatal server error:', error);
+    server.run({ transport: options.http ? 'http' : 'stdio', port: parseInt(options.port, 10) }).catch((err) => {
+      console.error('[FATAL] Bootstrap failed:', err);
       process.exit(1);
     });
   });
