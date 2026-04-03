@@ -93,3 +93,7 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/ 
+# Deployment artifacts
+*.zip
+*.tar.gz
+*.deployment.zip
