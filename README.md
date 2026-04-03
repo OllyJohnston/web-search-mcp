@@ -25,6 +25,12 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 - **Async Signal Safety**: Ensured all Playwright route signals and Axios AbortControllers are properly awaited/cancelled.
 - **Expanded UA Pool**: Significantly updated the User-Agent database with modern strings for all major browsers.
 
+### [0.6.0] - 2026-04-02 (MCP Stability & Logging)
+- **Protocol-First Initialization**: Delayed core component startup until the MCP transport is connected, preventing LM Studio from misidentifying early logs as "Errors".
+- **Dual-Stream Logging**: Implemented a hybrid logger that routes to MCP notifications with a mirrored fallback to `stderr` for better client visibility.
+- **Chromium-First Strategy**: Standardized the browser pool to use Chromium exclusively by default, matching SillyTavern's anti-bot reliability standards.
+- **Parallel Search by Default**: Enabled `FORCE_MULTI_ENGINE_SEARCH=true` by default to ensure fast response times across multiple providers.
+
 ### [0.5.0] - 2026-04-02 (SillyTavern Search Features Integration)
 - **Parallel Search Orchestration**: Refactored the search engine to execute multiple providers concurrently. Initial results are weighted by relevance, with an "early exit" success switch to prioritize speed.
 - **New Search Engines**: Added DuckDuckGo Lite and Startpage as high-performance Axios-based fallback engines, significantly improving reliability without browser overhead.
