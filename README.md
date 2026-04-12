@@ -317,32 +317,17 @@ Extract content from a specific URL. Improved support for Reddit and Shadow DOM.
 See [API.md](./docs/API.md) for complete technical details.
 
 ## Security Considerations
+## Contributing
+
+We welcome contributions! Please see our [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on how to get started, report bugs, and submit pull requests.
+
+## Security
+
+Please see our [SECURITY.md](./SECURITY.md) for our security policy and instructions on how to report vulnerabilities.
 
 > [!CAUTION]
 > **Do not run this server as root or administrator.** Playwright browser sandboxing is significantly compromised when running as an elevated user, which increases the risk of privilege escalation attacks from malicious web content.
 
-- **Sandboxing**: Always prefer `BROWSER_HEADLESS=true` and standard user accounts.
-- **Secrets Management**: Do not hardcode API keys or credentials in the source code. Use environment variables or a secure secret manager.
-
-## Contribution Guidelines
-
-We welcome contributions! To contribute:
-
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to the branch (`git push origin feature/amazing-feature`).
-5. Open a Pull Request.
-
-Please ensure your code passes linting (`npm run lint`) and builds successfully (`npm run build`) before submitting.
-
 ## License
 
 MIT License - see [LICENSE](./LICENSE) for details.
-
-## Feedback
-
-This is an open source project and we welcome feedback! If you encounter any issues or have suggestions:
-
-- Open an issue on GitHub
-- Submit a pull request
