@@ -11,7 +11,14 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 
 ## Changelog
 
+### [0.7.2] - 2026-04-11 (Build Improvements)
+
+- **Version Consistency**: Unified version number across package.json, McpServer, and CLI to 0.7.2
+- **Cleanup**: Removed stale build artifacts (old content-extractor files) from dist output
+- **Bundle Support**: Added build-bundle script for optimized production deployment using esbuild
+
 ### [0.7.1] - 2026-04-03 (Code Review Refinements)
+
 - **Observability**: Resolved a critical "silent error" bug where protocol notification failures were hidden. Added stderr fallback for logs.
 - **Browser Robustness**: Implemented exponential backoff retry for Chromium/Firefox launches to handle transient system errors.
 - **Configurable Throttling**: The search rate limit is no longer hardcoded and can be tuned via `RATE_LIMIT_PER_MINUTE`.
@@ -19,6 +26,7 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 - **Security Audit**: Added critical safety warnings in the README for root/administrator deployment.
 
 ### [0.7.0] - 2026-04-03 (SillyTavern Quality Parity)
+
 - **Advanced Fingerprinting**: Added `deviceScaleFactor` randomization and enforced `hasTouch: false` to ensure desktop-class parsing.
 - **Human-Mimicry Interaction**: Added non-linear mouse movement jitter during anti-bot challenge bypass.
 - **Stable Browser Acquisition**: Refined health-checks to use `isConnected()` only, eliminating "target closed" race conditions.
@@ -26,12 +34,14 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 - **Expanded UA Pool**: Significantly updated the User-Agent database with modern strings for all major browsers.
 
 ### [0.6.0] - 2026-04-02 (MCP Stability & Logging)
+
 - **Protocol-First Initialization**: Delayed core component startup until the MCP transport is connected, preventing LM Studio from misidentifying early logs as "Errors".
 - **Dual-Stream Logging**: Implemented a hybrid logger that routes to MCP notifications with a mirrored fallback to `stderr` for better client visibility.
 - **Chromium-First Strategy**: Standardized the browser pool to use Chromium exclusively by default, matching SillyTavern's anti-bot reliability standards.
 - **Parallel Search by Default**: Enabled `FORCE_MULTI_ENGINE_SEARCH=true` by default to ensure fast response times across multiple providers.
 
 ### [0.5.0] - 2026-04-02 (SillyTavern Search Features Integration)
+
 - **Parallel Search Orchestration**: Refactored the search engine to execute multiple providers concurrently. Initial results are weighted by relevance, with an "early exit" success switch to prioritize speed.
 - **New Search Engines**: Added DuckDuckGo Lite and Startpage as high-performance Axios-based fallback engines, significantly improving reliability without browser overhead.
 - **Improved Stealth & Interaction**: Implemented human-like mouse jitters, wheel scrolls, and randomized delays during content extraction to bypass bot detection on dynamic sites like Reddit and Twitter.
@@ -53,7 +63,9 @@ A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactor
 The server provides three specialised tools for different web search needs:
 
 ### 1. `full-web-search` (Main Tool)
+
 When a comprehensive search is requested, the server uses an **optimised search strategy**:
+
 1. **Parallel Execution Phase**: Simultaneously queries the top 2 engines (DDG Lite & Browser Bing) to minimize latency.
 2. **Success Switch Logic**: Evaluates results against a relevance threshold. If a "high quality" result is found early, it returns immediately and cancels remaining requests.
 3. **Multi-Engine Waterfall**: If parallel phase fails, it falls back to Axios Startpage and Browser Brave.
@@ -63,13 +75,17 @@ When a comprehensive search is requested, the server uses an **optimised search 
 7. **HTTP/2 error recovery**: Automatically falls back to HTTP/1.1 when protocol errors occur
 
 ### 2. `get-web-search-summaries` (Lightweight Alternative)
+
 For quick search results without full content extraction:
+
 1. Performs the same optimised multi-engine search as `full-web-search`
 2. Returns only the search result snippets/descriptions
 3. Does not follow links to extract full page content
 
 ### 3. `get-single-web-page-content` (Utility Tool)
+
 For extracting content from a specific webpage:
+
 1. Takes a single URL as input
 2. Follows the URL and extracts the main page content
 3. Removes navigation, ads, and other non-content elements. Now with improved support for dynamic content and shadow DOM.
@@ -79,7 +95,8 @@ For extracting content from a specific webpage:
 This MCP server has been developed and tested with **LM Studio**, **LibreChat**, and standard MCP clients.
 
 ### Model Compatibility
-**Important:** Prioritise using more recent models designated for tool use. 
+
+**Important:** Prioritise using more recent models designated for tool use.
 
 - ✅ Works perfectly with: **Gemini 3.5/2.0**, **Claude 4.6/3.5**, **Gemma 3**
 - ✅ Works well with: **Qwen 3.5/2.5**
@@ -89,6 +106,7 @@ This MCP server has been developed and tested with **LM Studio**, **LibreChat**,
 ## Installation
 
 **Requirements:**
+
 - Node.js 18.0.0 or higher
 - npm 8.0.0 or higher
 
@@ -96,10 +114,12 @@ This MCP server has been developed and tested with **LM Studio**, **LibreChat**,
    Unzip the archive into your preferred deployment folder (e.g., `E:\Utils\WebSearchMCP`).
 
 2. **Open a terminal in that folder and run:**
+
    ```bash
    npm install
    npx playwright install chromium firefox
    ```
+
    **Important**: This step is required even if you have the `dist/` folder, as it installs the MCP SDK and the necessary browser binaries used for searching.
 
 3. **Verify the build**:
@@ -133,43 +153,52 @@ Standard MCP configuration for desktop clients (e.g., Claude Desktop, LM Studio)
 To use this with LibreChat (Docker), include it in your `librechat.yaml`. You must first mount your local directory in `docker-compose.override.yml`:
 
 **In `docker-compose.override.yml`**:
+
 ```yaml
 services:
   api:
     volumes:
-    - type: bind
-      source: /path/to/your/mcp/directory
-      target: /app/mcp
+      - type: bind
+        source: /path/to/your/mcp/directory
+        target: /app/mcp
 ```
 
 **In `librechat.yaml`**:
+
 ```yaml
 mcpServers:
   web-search:
     type: stdio
     command: node
     args:
-    - /app/mcp/web-search-mcp/dist/index.js
+      - /app/mcp/web-search-mcp/dist/index.js
     serverInstructions: true
 ```
 
 ## Usage
 
 ### Stdio Mode (Default)
+
 Standard way to connect to local tools.
+
 ```bash
 node dist/index.js
 ```
 
 ### HTTP Mode (SSE)
+
 Runs the server as a network service.
+
 ```bash
 node dist/index.js --http --port 8000
 ```
+
 **Endpoint**: `http://localhost:8000/mcp`
 
 ### Playwright Sandbox Control
+
 By default, the server runs Playwright with `--no-sandbox` for maximum compatibility in containerized environments.
+
 - **CLI Flag**: Use `--no-sandbox` (default: true) or `--sandbox` (to force sandbox).
 - **Env Var**: Set `PLAYWRIGHT_NO_SANDBOX=true` (or `false` to enable sandbox).
 
@@ -222,7 +251,8 @@ By default, the server runs Playwright with `--no-sandbox` for maximum compatibi
 - **EventEmitter Warnings**: Our pooling logic correctly manages listeners, resolving "MaxListenersExceededWarning" from older versions.
 
 ### ✨ Search Quality Issues
-- **Relevance Validation**: If you receive irrelevant results, increase `RELEVANCE_THRESHOLD` (e.g., to `0.5`). 
+
+- **Relevance Validation**: If you receive irrelevant results, increase `RELEVANCE_THRESHOLD` (e.g., to `0.5`).
 - **Force Multi-Engine**: If one engine is consistently failing or blocked, set `FORCE_MULTI_ENGINE_SEARCH=true` to force the server to aggregate results from all sources every time.
 
 ## For Development
@@ -237,8 +267,10 @@ npm run format # Run Prettier
 ## MCP Tools
 
 ### 1. `full-web-search`
+
 Comprehensive search with content extraction.
 **Example Usage:**
+
 ```json
 {
   "name": "full-web-search",
@@ -251,8 +283,10 @@ Comprehensive search with content extraction.
 ```
 
 ### 2. `get-web-search-summaries`
+
 Fast search without following links.
 **Example Usage:**
+
 ```json
 {
   "name": "get-web-search-summaries",
@@ -264,8 +298,10 @@ Fast search without following links.
 ```
 
 ### 3. `get-single-web-page-content`
+
 Extract content from a specific URL. Improved support for Reddit and Shadow DOM.
 **Example Usage:**
+
 ```json
 {
   "name": "get-single-web-page-content",
@@ -277,6 +313,7 @@ Extract content from a specific URL. Improved support for Reddit and Shadow DOM.
 ```
 
 ## Documentation
+
 See [API.md](./docs/API.md) for complete technical details.
 
 ## Security Considerations
@@ -290,6 +327,7 @@ See [API.md](./docs/API.md) for complete technical details.
 ## Contribution Guidelines
 
 We welcome contributions! To contribute:
+
 1. Fork the repository.
 2. Create a feature branch (`git checkout -b feature/amazing-feature`).
 3. Commit your changes (`git commit -m 'Add some amazing feature'`).
@@ -299,9 +337,12 @@ We welcome contributions! To contribute:
 Please ensure your code passes linting (`npm run lint`) and builds successfully (`npm run build`) before submitting.
 
 ## License
+
 MIT License - see [LICENSE](./LICENSE) for details.
 
 ## Feedback
+
 This is an open source project and we welcome feedback! If you encounter any issues or have suggestions:
+
 - Open an issue on GitHub
 - Submit a pull request

@@ -1,6 +1,6 @@
 {
   "name": "web-search-mcp-server",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactored and Enhanced)",
   "license": "MIT",
   "type": "module",
@@ -9,7 +9,9 @@
     "web-search-mcp": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc && echo '✅ TypeScript compilation complete: dist/index.js'",
+    "build": "npm run clean && tsc && echo '✅ TypeScript compilation complete: dist/index.js'",
+    "clean": "powershell -Command \"if (Test-Path dist) { Remove-Item -Path dist -Recurse -Force }\"",
+    "bundle": "node scripts/bundle.js",
     "dev": "tsx watch src/index.ts",
     "start": "node ./dist/index.js",
     "lint": "eslint \"src/**/*.ts\"",
