@@ -28,7 +28,7 @@ class WebSearchMCPServer {
   constructor(cliConfig?: { playwrightNoSandbox?: boolean }) {
     this.server = new McpServer({
       name: 'web-search-mcp-server',
-      version: '0.7.2',
+      version: '0.7.3',
     });
 
     this.config = this.parseConfig(cliConfig);
@@ -44,8 +44,9 @@ class WebSearchMCPServer {
         if (this.isConnected) {
           const baseServer = this.server.server;
           if (baseServer) {
+            // According to MCP spec, the method is "notifications/message"
             baseServer.notification({
-              method: 'notifications/logging/message',
+              method: 'notifications/message',
               params: {
                 level: level as any,
                 data: message,
@@ -317,7 +318,7 @@ class WebSearchMCPServer {
       this.isConnected = true;
 
       this.logger.force(
-        `Web Search MCP Server (v0.7.2) initialization starting...`
+        `Web Search MCP Server (v0.7.3) initialization starting...`
       );
 
       // 2. Initialize core components AFTER protocol is up
@@ -367,7 +368,7 @@ const program = new Command();
 program
   .name('web-search-mcp')
   .description('Web Search MCP server for local LLMs')
-  .version('0.7.2')
+  .version('0.7.3')
   .option('--http', 'Run in HTTP/SSE mode')
   .option('--port <number>', 'Port for HTTP mode', '8000')
   .option('--no-sandbox', 'Disable Playwright sandbox', true)
