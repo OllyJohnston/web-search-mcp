@@ -29,6 +29,10 @@ class WebSearchMCPServer {
     this.server = new McpServer({
       name: 'web-search-mcp-server',
       version: '0.7.3',
+    }, {
+      capabilities: {
+        logging: {}
+      }
     });
 
     this.config = this.parseConfig(cliConfig);
