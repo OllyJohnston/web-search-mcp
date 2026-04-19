@@ -45,9 +45,9 @@ Fully tested with **LM Studio**, **Claude Desktop**, and **LibreChat**.
 
 ### Recommended Models
 Prioritize models designated for "Tool Use" or "Function Calling":
-- ✅ **Gemini 3.5/3.1**, **Claude 4.6/3.5**, **Gemma 4/3**
-- ✅ **Qwen 6.0/3.5**, **Llama 4.2/3.3**
-- ✅ **DeepSeek R2 / V4**
+- ✅ **Gemini 3.1**, **Claude 3.7/3.5**, **Gemma 4**
+- ✅ **Qwen 3.6/3.5**, **Llama 3.3/3.2**
+- ✅ **DeepSeek R1 / V3**
 
 ---
 
