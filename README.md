@@ -230,7 +230,7 @@ The server uses a **Shared Browser Pool** with context isolation.
 
 ### Recent Improvements
 - **Protocol Compliance**: Optimized for standard MCP notifications (`notifications/message`) for clean client output.
-- **SillyTavern Parity**: Logic parity with the original search components, including hardware signature spoofing.
+- **SillyTavern Parity**: Achieved feature parity with [SillyTavern MCP Local Search](https://github.com/OllyJohnston/SillyTavern-MCP-Local-Search), including advanced hardware signature spoofing.
 - **Stable Acquisition**: Refined health-checks and exponential backoff retry for browser launches.
 
 ### [0.7.3] - 2024-04-13
@@ -247,6 +247,10 @@ The server uses a **Shared Browser Pool** with context isolation.
 - **Dual-Stream**: Hybrid logger support for both MCP notifications and standard `stderr`.
 
 ---
+
+## 🔗 Related Projects
+
+- **[SillyTavern MCP Local Search](https://github.com/OllyJohnston/SillyTavern-MCP-Local-Search)**: The original local search plugin for SillyTavern that inspired the high-performance logic used in this server.
 
 ## 🤝 Contributing
 
