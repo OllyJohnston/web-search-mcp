@@ -3,6 +3,8 @@ import * as cheerio from 'cheerio';
 import { ContentExtractionOptions, SearchResult, ServerConfig } from './types.js';
 import { cleanText, getWordCount, getContentPreview, generateTimestamp, isPdfUrl, Logger, getRandomUserAgent } from './utils.js';
 import { BrowserPool } from './browser-pool.js';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import * as https from 'https';
 
 export class EnhancedContentExtractor {
   private readonly defaultTimeout: number;
@@ -48,13 +50,18 @@ export class EnhancedContentExtractor {
   }
 
   private async extractWithAxios(options: ContentExtractionOptions): Promise<string> {
-    const { url, timeout = this.defaultTimeout, maxContentLength = this.maxContentLength } = options;
+    const { url, timeout = this.defaultTimeout, maxContentLength = this.maxContentLength, proxyUrl } = options;
     const controller = new AbortController();
     try {
+      const agent = proxyUrl
+        ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false })
+        : new https.Agent({ rejectUnauthorized: false });
+
       const response = await axios.get(url, {
         headers: this.getRandomHeaders(),
         timeout,
         signal: controller.signal,
+        httpsAgent: agent,
         validateStatus: (status: number) => status < 400,
       });
       let content = this.parseContent(response.data);
@@ -72,7 +79,7 @@ export class EnhancedContentExtractor {
   }
 
   private async extractWithBrowser(options: ContentExtractionOptions): Promise<string> {
-    const { url, timeout = this.defaultTimeout } = options;
+    const { url, timeout = this.defaultTimeout, proxyUrl } = options;
     const browser = await this.browserPool.getBrowser();
     let context;
     try {
@@ -80,6 +87,7 @@ export class EnhancedContentExtractor {
         userAgent: getRandomUserAgent(),
         viewport: { width: 1920, height: 1080 },
         locale: 'en-US',
+        proxy: proxyUrl ? { server: proxyUrl } : undefined,
       });
       const page = await context.newPage();
       
@@ -148,7 +156,7 @@ export class EnhancedContentExtractor {
     };
   }
 
-  async extractContentForResults(results: SearchResult[], targetCount: number = results.length, deadline?: number): Promise<SearchResult[]> {
+  async extractContentForResults(results: SearchResult[], targetCount: number = results.length, deadline?: number, proxyUrl?: string): Promise<SearchResult[]> {
     const nonPdfResults = results.filter(result => !isPdfUrl(result.url));
     const resultsToProcess = nonPdfResults.slice(0, Math.min(targetCount * 2, 10));
     
@@ -182,7 +190,7 @@ export class EnhancedContentExtractor {
             }
           }, effectiveTimeout + 1000);
 
-          this.extractContent({ url: result.url, timeout: effectiveTimeout })
+          this.extractContent({ url: result.url, timeout: effectiveTimeout, proxyUrl })
             .then((content) => {
               if (!settled) {
                 settled = true;

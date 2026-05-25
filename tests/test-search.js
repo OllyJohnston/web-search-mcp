@@ -2,8 +2,27 @@
 
 // Simple test script to verify search functionality
 import { SearchEngine } from '../dist/search-engine.js';
+import { BrowserPool } from '../dist/browser-pool.js';
+import { Logger } from '../dist/utils.js';
 
-const searchEngine = new SearchEngine();
+const config = {
+  maxContentLength: 500000,
+  defaultTimeout: 15000,
+  maxBrowsers: 3,
+  browserHeadless: true,
+  browserTypes: ['chromium'],
+  browserFallbackThreshold: 0.5,
+  enableRelevanceChecking: true,
+  relevanceThreshold: 0.3,
+  forceMultiEngineSearch: false,
+  debugBrowserLifecycle: false,
+  debugBingSearch: false,
+  playwrightNoSandbox: true,
+  rateLimitPerMinute: 10
+};
+const logger = new Logger(true);
+const browserPool = new BrowserPool(config, logger);
+const searchEngine = new SearchEngine(config, browserPool, logger);
 
 async function testSearch() {
   console.log('Testing search functionality...');
@@ -26,11 +45,11 @@ async function testSearch() {
     });
     
     // Clean up
-    await searchEngine.closeAll();
+    await browserPool.closeAll();
     
   } catch (error) {
     console.error('Search test failed:', error);
-    await searchEngine.closeAll();
+    await browserPool.closeAll();
     process.exit(1);
   }
 }

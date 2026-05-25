@@ -4,6 +4,8 @@ import { SearchOptions, SearchResult, SearchResultWithMetadata, ServerConfig, SE
 import { generateTimestamp, sanitizeQuery, getRandomUserAgent, Logger } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
 import { BrowserPool } from './browser-pool.js';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import * as https from 'https';
 
 interface ParallelStatus {
   resultsFound: boolean;
@@ -23,7 +25,7 @@ export class SearchEngine {
   }
 
   async search(options: SearchOptions): Promise<SearchResultWithMetadata> {
-    const { query, numResults = 5, timeout = 10000 } = options;
+    const { query, numResults = 5, timeout = 10000, proxyUrl } = options;
     const sanitizedQuery = sanitizeQuery(query);
 
     this.logger.info(`[SearchEngine] Starting search for query: "${sanitizedQuery}"`);
@@ -45,9 +47,9 @@ export class SearchEngine {
 
         // Create the list of all available engines
         const allApproaches = [
-          { method: this.tryBrowserBingSearch.bind(this), name: 'Browser Bing', id: 'bing' },
-          { method: this.tryDuckDuckGoSearch.bind(this), name: 'Axios DuckDuckGo', id: 'duckduckgo' },
-          { method: this.tryStartpageSearch.bind(this), name: 'Axios Startpage', id: 'startpage' }
+          { method: (q: string, n: number, t: number, s?: ParallelStatus) => this.tryBrowserBingSearch(q, n, t, proxyUrl, s), name: 'Browser Bing', id: 'bing' },
+          { method: (q: string, n: number, t: number, s?: ParallelStatus) => this.tryDuckDuckGoSearch(q, n, t, proxyUrl, s), name: 'Axios DuckDuckGo', id: 'duckduckgo' },
+          { method: (q: string, n: number, t: number, s?: ParallelStatus) => this.tryStartpageSearch(q, n, t, proxyUrl, s), name: 'Axios Startpage', id: 'startpage' }
         ];
 
         // Determine the waterfall order
@@ -176,11 +178,15 @@ export class SearchEngine {
     return array;
   }
 
-  private async tryStartpageSearch(query: string, numResults: number, timeout: number, status?: ParallelStatus): Promise<SearchResult[]> {
+  private async tryStartpageSearch(query: string, numResults: number, timeout: number, proxyUrl?: string, status?: ParallelStatus): Promise<SearchResult[]> {
     this.logger.info(`[SearchEngine] Trying Startpage (Axios) as high-quality fallback...`);
     try {
       const userAgent = getRandomUserAgent();
       const searchUrl = 'https://www.startpage.com/sp/search';
+      const agent = proxyUrl
+        ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false })
+        : new https.Agent({ rejectUnauthorized: false });
+
       const response = await axios.get(searchUrl, {
         params: {
           query: query,
@@ -200,6 +206,7 @@ export class SearchEngine {
           'Upgrade-Insecure-Requests': '1',
         },
         timeout,
+        httpsAgent: agent,
         validateStatus: (status: number) => status === 200,
       });
 
@@ -252,7 +259,7 @@ export class SearchEngine {
     return results;
   }
 
-  private async tryBrowserBingSearch(query: string, numResults: number, timeout: number, status?: ParallelStatus): Promise<SearchResult[]> {
+  private async tryBrowserBingSearch(query: string, numResults: number, timeout: number, proxyUrl?: string, status?: ParallelStatus): Promise<SearchResult[]> {
     this.logger.info(`[SearchEngine] BING: Starting browser-based search with shared browser for query: "${query}"`);
     
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -264,7 +271,7 @@ export class SearchEngine {
         const launchTime = Date.now() - startTime;
         this.logger.info(`[SearchEngine] BING: Browser acquired successfully in ${launchTime}ms, connected: ${browser.isConnected()}`);
         
-        const results = await this.tryBrowserBingSearchInternal(browser, query, numResults, timeout, status);
+        const results = await this.tryBrowserBingSearchInternal(browser, query, numResults, timeout, proxyUrl, status);
         
         if (results.length > 0) {
           this.logger.info(`[SearchEngine] BING: Search completed successfully with ${results.length} results`);
@@ -297,7 +304,7 @@ export class SearchEngine {
     return [];
   }
 
-  private async tryBrowserBingSearchInternal(browser: any, query: string, numResults: number, timeout: number, status?: ParallelStatus): Promise<SearchResult[]> {
+  private async tryBrowserBingSearchInternal(browser: any, query: string, numResults: number, timeout: number, proxyUrl?: string, status?: ParallelStatus): Promise<SearchResult[]> {
     if (!browser.isConnected()) {
       this.logger.error(`[SearchEngine] BING: Browser is not connected`);
       throw new Error('Browser is not connected');
@@ -316,6 +323,7 @@ export class SearchEngine {
         timezoneId: 'America/New_York',
         colorScheme: 'light',
         deviceScaleFactor: Math.random() > 0.5 ? 2 : 1,
+        proxy: proxyUrl ? { server: proxyUrl } : undefined,
         extraHTTPHeaders: {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
@@ -338,23 +346,23 @@ export class SearchEngine {
           return [];
         }
         
-        this.logger.info(`[SearchEngine] BING: Attempting enhanced search (homepage → form submission)...`);
-        results = await this.tryEnhancedBingSearch(page, query, numResults, timeout, status);
-      } catch (enhancedError) {
-        this.logger.warn(`[SearchEngine] BING: Enhanced search failed, will try direct search if no results.`);
+        this.logger.info(`[SearchEngine] BING: Attempting direct URL search...`);
+        results = await this.tryDirectBingSearch(page, query, numResults, timeout, status);
+      } catch (directError) {
+        this.logger.warn(`[SearchEngine] BING: Direct search failed: ${directError instanceof Error ? directError.message : String(directError)}. Will try form-filling fallback.`);
       }
 
       if (results.length === 0) {
-        this.logger.info(`[SearchEngine] BING: Enhanced search empty or failed, closing page and trying direct URL search...`);
+        this.logger.info(`[SearchEngine] BING: Direct search empty or failed, closing page and trying enhanced form-filling fallback...`);
         await page.close().catch((e: any) => this.logger.error(`[SearchEngine] BING: Error closing page:`, e));
         page = await context.newPage();
 
         if (status?.resultsFound) {
-          this.logger.info(`[SearchEngine] BING: Parallel result found before direct search. Aborting.`);
+          this.logger.info(`[SearchEngine] BING: Parallel result found before form-filling. Aborting.`);
           return [];
         }
         
-        results = await this.tryDirectBingSearch(page, query, numResults, timeout, status);
+        results = await this.tryEnhancedBingSearch(page, query, numResults, timeout, status);
       }
 
       return results;
@@ -378,22 +386,23 @@ export class SearchEngine {
     await this.dismissConsent(page);
     await page.waitForTimeout(500);
 
+    const inputSelector = '#sb_form_q, input[name="q"], textarea[name="q"]';
     try {
-      this.logger.info(`[SearchEngine] BING: Looking for search form elements...`);
+      this.logger.info(`[SearchEngine] BING: Looking for search input element...`);
       try {
-        await page.waitForSelector('#sb_form_q', { timeout: 4000 });
+        await page.waitForSelector(inputSelector, { timeout: 4000 });
       } catch (timeoutError) {
         const handled = await this.handleBingCaptcha(page);
         if (handled) {
           this.logger.info(`[SearchEngine] BING: Captcha handled, retrying search box detection...`);
-          await page.waitForSelector('#sb_form_q', { timeout: 5000 });
+          await page.waitForSelector(inputSelector, { timeout: 5000 });
         } else {
           throw timeoutError;
         }
       }
       
       this.logger.info(`[SearchEngine] BING: Search box found, filling with query: "${query}"`);
-      await page.fill('#sb_form_q', query);
+      await page.fill(inputSelector, query);
       
       const jitter = Math.floor(Math.random() * 1500 + 500);
       if (status?.resultsFound) {
@@ -401,13 +410,13 @@ export class SearchEngine {
         return [];
       }
       
-      this.logger.info(`[SearchEngine] BING: Mimicking human thought, waiting ${jitter}ms before clicking search...`);
+      this.logger.info(`[SearchEngine] BING: Mimicking human thought, waiting ${jitter}ms before pressing Enter...`);
       await page.waitForTimeout(jitter);
       
-      this.logger.info(`[SearchEngine] BING: Clicking search button and waiting for navigation...`);
+      this.logger.info(`[SearchEngine] BING: Pressing Enter to submit search and waiting for navigation...`);
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: timeout }),
-        page.click('#search_icon')
+        page.press(inputSelector, 'Enter')
       ]);
       const searchLoadTime = Date.now() - startTime;
       this.logger.info(`[SearchEngine] BING: Search completed in ${searchLoadTime}ms total`);
@@ -490,10 +499,14 @@ export class SearchEngine {
     return cvid;
   }
 
-  private async tryDuckDuckGoSearch(query: string, numResults: number, timeout: number, status?: ParallelStatus): Promise<SearchResult[]> {
+  private async tryDuckDuckGoSearch(query: string, numResults: number, timeout: number, proxyUrl?: string, status?: ParallelStatus): Promise<SearchResult[]> {
     this.logger.info(`[SearchEngine] Trying DuckDuckGo (HTML Lite) as fallback...`);
     try {
       const userAgent = getRandomUserAgent();
+      const agent = proxyUrl
+        ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false })
+        : new https.Agent({ rejectUnauthorized: false });
+
       const response = await axios.get('https://html.duckduckgo.com/html/', {
         params: { q: query },
         headers: {
@@ -510,6 +523,7 @@ export class SearchEngine {
           'Sec-Fetch-Site': 'same-origin',
         },
         timeout,
+        httpsAgent: agent,
         validateStatus: (status: number) => status < 400,
       });
       this.logger.debug(`[SearchEngine] DuckDuckGo got response with status: ${response.status}`);
@@ -697,11 +711,17 @@ export class SearchEngine {
 
   private async dismissConsent(page: any): Promise<void> {
     try {
-      const selectors = ['#bnp_btn_accept', '#adlt_set_save', '.bnp_btn_accept'];
+      const selectors = [
+        '#bnp_btn_accept',
+        '#bnp_cookie_btn_accept',
+        '#adlt_set_save',
+        'button:has-text("Accept")',
+      ];
       for (const selector of selectors) {
-        if (await page.isVisible(selector)) {
+        const isVisible = await page.locator(selector).first().isVisible().catch(() => false);
+        if (isVisible) {
           this.logger.info(`[SearchEngine] BING: Dismissing consent banner (${selector})`);
-          await page.click(selector).catch(() => {});
+          await page.locator(selector).first().click().catch(() => {});
           await page.waitForTimeout(500);
         }
       }

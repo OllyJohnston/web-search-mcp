@@ -28,7 +28,7 @@ class WebSearchMCPServer {
   constructor(cliConfig?: { playwrightNoSandbox?: boolean }) {
     this.server = new McpServer({
       name: 'web-search-mcp-server',
-      version: '0.7.3',
+      version: '0.7.5',
     }, {
       capabilities: {
         logging: {}
@@ -155,6 +155,11 @@ class WebSearchMCPServer {
           .min(0)
           .optional()
           .describe('Maximum characters per result content'),
+        proxyUrl: z
+          .string()
+          .url()
+          .optional()
+          .describe('Optional proxy URL (e.g. http://127.0.0.1:8080)'),
       },
       async args => {
         this.logger.info(
@@ -228,12 +233,18 @@ class WebSearchMCPServer {
           .max(10)
           .default(5)
           .describe('Number of results'),
+        proxyUrl: z
+          .string()
+          .url()
+          .optional()
+          .describe('Optional proxy URL (e.g. http://127.0.0.1:8080)'),
       },
       async args => {
-        const { query, limit } = args as { query: string; limit: number };
+        const { query, limit, proxyUrl } = args as { query: string; limit: number; proxyUrl?: string };
         const result = await this.searchEngine.search({
           query,
           numResults: limit,
+          proxyUrl,
         });
         let responseText = `Search summaries for "${query}":\n\n`;
         result.results.forEach((item, i) => {
@@ -254,15 +265,22 @@ class WebSearchMCPServer {
           .min(0)
           .optional()
           .describe('Content limit'),
+        proxyUrl: z
+          .string()
+          .url()
+          .optional()
+          .describe('Optional proxy URL (e.g. http://127.0.0.1:8080)'),
       },
       async args => {
-        const { url, maxContentLength } = args as {
+        const { url, maxContentLength, proxyUrl } = args as {
           url: string;
           maxContentLength?: number;
+          proxyUrl?: string;
         };
         const content = await this.contentExtractor.extractContent({
           url,
           maxContentLength: maxContentLength || this.config.maxContentLength,
+          proxyUrl,
         });
         return { content: [{ type: 'text' as const, text: content }] };
       }
@@ -274,12 +292,13 @@ class WebSearchMCPServer {
     deadline?: number
   ): Promise<WebSearchToolOutput> {
     const startTime = Date.now();
-    const { query, limit = 5, includeContent = true } = input;
+    const { query, limit = 5, includeContent = true, proxyUrl } = input;
 
     const searchResponse = await this.searchEngine.search({
       query,
       numResults: limit,
       forceMultiEngine: this.config.forceMultiEngineSearch,
+      proxyUrl,
     });
 
     let results = searchResponse.results;
@@ -287,7 +306,8 @@ class WebSearchMCPServer {
       results = await this.contentExtractor.extractContentForResults(
         results,
         limit,
-        deadline
+        deadline,
+        proxyUrl
       );
     }
 
@@ -322,7 +342,7 @@ class WebSearchMCPServer {
       this.isConnected = true;
 
       this.logger.force(
-        `Web Search MCP Server (v0.7.3) initialization starting...`
+        `Web Search MCP Server (v0.7.5) initialization starting...`
       );
 
       // 2. Initialize core components AFTER protocol is up
@@ -372,7 +392,7 @@ const program = new Command();
 program
   .name('web-search-mcp')
   .description('Web Search MCP server for local LLMs')
-  .version('0.7.3')
+  .version('0.7.5')
   .option('--http', 'Run in HTTP/SSE mode')
   .option('--port <number>', 'Port for HTTP mode', '8000')
   .option('--no-sandbox', 'Disable Playwright sandbox', true)

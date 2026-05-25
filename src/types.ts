@@ -25,12 +25,14 @@ export interface SearchOptions {
   timeout?: number;
   preferredEngine?: string;
   forceMultiEngine?: boolean;
+  proxyUrl?: string;
 }
 
 export interface ContentExtractionOptions {
   url: string;
   timeout?: number;
   maxContentLength?: number;
+  proxyUrl?: string;
 }
 
 export interface WebSearchToolInput {
@@ -38,6 +40,7 @@ export interface WebSearchToolInput {
   limit?: number;
   includeContent?: boolean;
   maxContentLength?: number;
+  proxyUrl?: string;
 }
 
 export interface WebSearchToolOutput {

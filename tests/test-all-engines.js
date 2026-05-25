@@ -6,6 +6,28 @@
  */
 
 import { SearchEngine } from '../dist/search-engine.js';
+import { BrowserPool } from '../dist/browser-pool.js';
+import { Logger } from '../dist/utils.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const config = {
+  maxContentLength: 500000,
+  defaultTimeout: 15000,
+  maxBrowsers: 3,
+  browserHeadless: true,
+  browserTypes: ['chromium'],
+  browserFallbackThreshold: 0.5,
+  enableRelevanceChecking: true,
+  relevanceThreshold: 0.3,
+  forceMultiEngineSearch: false,
+  debugBrowserLifecycle: false,
+  debugBingSearch: false,
+  playwrightNoSandbox: true,
+  rateLimitPerMinute: 10
+};
+const logger = new Logger(true);
+let browserPool;
 
 async function testSearchEngine(query = 'javascript programming', numResults = 3) {
   console.log('🔍 Testing Web Search MCP Server - All Engines');
@@ -14,7 +36,8 @@ async function testSearchEngine(query = 'javascript programming', numResults = 3
   console.log(`Expected results: ${numResults}`);
   console.log('');
 
-  const searchEngine = new SearchEngine();
+  browserPool = new BrowserPool(config, logger);
+  const searchEngine = new SearchEngine(config, browserPool, logger);
 
   try {
     const startTime = Date.now();
@@ -68,7 +91,9 @@ async function testSearchEngine(query = 'javascript programming', numResults = 3
     console.error('❌ Search failed:', error.message);
     return false;
   } finally {
-    await searchEngine.closeAll();
+    if (browserPool) {
+      await browserPool.closeAll();
+    }
   }
 }
 
@@ -119,7 +144,11 @@ async function runTests() {
 }
 
 // Run tests if this script is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isMain = process.argv[1] && (
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) ||
+  path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])
+);
+if (isMain) {
   runTests().catch(console.error);
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "web-search-mcp-server",
-  "version": "0.7.3",
+  "version": "0.7.5",
   "description": "A simple, locally hosted Web Search MCP server for use with Local LLMs (Refactored and Enhanced)",
   "license": "MIT",
   "type": "module",
@@ -38,6 +38,7 @@
     "cheerio": "^1.0.0-rc.12",
     "commander": "^14.0.3",
     "express": "^5.2.1",
+    "https-proxy-agent": "^9.0.0",
     "p-limit": "^6.2.0",
     "p-retry": "^6.2.1",
     "playwright": "^1.48.0",

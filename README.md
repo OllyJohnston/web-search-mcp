@@ -3,7 +3,7 @@
 **The high-performance, bot-evading search engine for your local AI stack.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.3-blue.svg)](./package.json)
+[![Version](https://img.shields.io/badge/version-0.7.5-blue.svg)](./package.json)
 
 Web Search MCP is a locally-hosted Model Context Protocol (MCP) server that empowers your local LLMs (like Gemini, Claude, Llama, and DeepSeek) with real-time web access. It combines advanced bot-evasion techniques, multi-engine orchestration, and high-quality content extraction to deliver faster, more reliable search results without the need for expensive API keys.
 
@@ -12,6 +12,7 @@ Web Search MCP is a locally-hosted Model Context Protocol (MCP) server that empo
 ## ✨ Key Features
 
 - **🕵️ Stealth Search**: Advanced bot-evasion featuring randomized `deviceScaleFactor` hardware fingerprinting, human-mimicry interaction logic (non-linear mouse jitter), and rotating User-Agents.
+- **🔒 Isolated Scraper Proxy**: Support for routing search and web-scraping queries (Axios & Playwright) through an HTTP/HTTPS proxy dynamically on a per-request basis.
 - **⚡ Parallel Multi-Engine Execution**: Simultaneously queries multiple providers (Bing, Startpage, DuckDuckGo) for maximum speed and fallback reliability.
 - **📄 Enhanced Content Crawler**: High-performance page extraction that automatically filters out navigation, ads, and heavy resources (images/fonts) to preserve your model's context window.
 - **🧠 Shared Browser Pool**: Efficiently manages Playwright instances with automatic 2-minute inactivity cleanup to keep system resource usage minimal.
@@ -173,7 +174,8 @@ Comprehensive search with content extraction.
   "arguments": {
     "query": "TypeScript MCP server",
     "limit": 3,
-    "includeContent": true
+    "includeContent": true,
+    "proxyUrl": "http://127.0.0.1:8080"
   }
 }
 ```
@@ -185,7 +187,8 @@ Fast search without following links.
   "name": "get-web-search-summaries",
   "arguments": {
     "query": "TypeScript MCP server",
-    "limit": 5
+    "limit": 5,
+    "proxyUrl": "http://127.0.0.1:8080"
   }
 }
 ```
@@ -197,7 +200,8 @@ Extract content from a specific URL. Improved support for Reddit and Shadow DOM.
   "name": "get-single-web-page-content",
   "arguments": {
     "url": "https://example.com/article",
-    "maxContentLength": 5000
+    "maxContentLength": 5000,
+    "proxyUrl": "http://127.0.0.1:8080"
   }
 }
 ```
@@ -233,7 +237,12 @@ The server uses a **Shared Browser Pool** with context isolation.
 - **SillyTavern Parity**: Achieved feature parity with [SillyTavern MCP Local Search](https://github.com/OllyJohnston/SillyTavern-MCP-Local-Search), including advanced hardware signature spoofing.
 - **Stable Acquisition**: Refined health-checks and exponential backoff retry for browser launches.
 
-### [0.7.3] - 2024-04-13
+### [0.7.5] - 2026-05-25
+- **🔒 Isolated Scraper Proxy**: Added dynamic HTTP/HTTPS proxy support for both Axios search and Playwright browser page extraction via `proxyUrl` parameters.
+- **⚡ Bing Search Optimizations**: Swapped search order to prioritize direct query URL execution (completes under 500ms). Form-filling is preserved as a fallback using robust selectors and submitting via the Enter key.
+- **🛡️ Safe Consent Banner Dismissal**: Avoids strict-mode locator exceptions on multiple cookie banner accept buttons.
+
+### [0.7.3] - 2026-04-13
 - **Protocol Fix**: Corrected non-standard logging notification method to resolve Pydantic validation errors in some clients.
 - **Stability**: Declared `logging` capability in server constructor as required by MCP SDK v1.0+.
 
